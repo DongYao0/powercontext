@@ -228,9 +228,16 @@ describe('registered automatic path', () => {
       content: [{ type: 'text', text: 'Use the rewritten request.' }],
       source: { kind: 'user' },
     }
+    const runtimeContext = {
+      content: [{ type: 'text', text: 'Current runtime context. Workspace policy details.' }],
+      source: {
+        kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt', form: 'snapshot',
+        sections: [{ name: 'sandbox-policy', text: 'Workspace policy details.' }],
+      },
+    }
     await h.run({
       messages: [userMessage],
-      next: async () => ({ kind: 'enter', messages: [finalMessage] }),
+      next: async () => ({ kind: 'enter', messages: [finalMessage, runtimeContext] }),
     })
 
     expect(h.requests.find(({ path }) => path === PREPARE)?.body).toMatchObject({
@@ -240,6 +247,7 @@ describe('registered automatic path', () => {
       content: 'Use the rewritten request.',
     })
     expect(JSON.stringify(h.requests)).not.toContain('Continue the API work.')
+    expect(JSON.stringify(h.requests)).not.toContain('Workspace policy details.')
   })
 
   it('reports message construction failure without calling downstream twice', async () => {

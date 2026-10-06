@@ -75,8 +75,18 @@ function messagesToText(messages: readonly unknown[]): string {
     .join('\n\n')
 }
 
+function isRuntimeContextSnapshot(message: unknown): boolean {
+  if (!message || typeof message !== 'object') return false
+  const source = (message as { source?: unknown }).source
+  if (!source || typeof source !== 'object') return false
+  const value = source as { kind?: unknown; plugin?: unknown; form?: unknown }
+  return value.kind === 'plugin'
+    && value.plugin === '@deepseek-ai/dsh-system-prompt'
+    && value.form === 'snapshot'
+}
+
 export function messagesToQuery(messages: readonly unknown[]): string {
-  return messagesToText(messages)
+  return messagesToText(messages.filter((message) => !isRuntimeContextSnapshot(message)))
 }
 
 export function messagesToUserPrompt(messages: readonly unknown[]): string {

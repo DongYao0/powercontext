@@ -3013,8 +3013,15 @@ function messageText(message) {
 function messagesToText(messages) {
 	return messages.map(messageText).filter(Boolean).join("\n\n");
 }
+function isRuntimeContextSnapshot(message) {
+	if (!message || typeof message !== "object") return false;
+	const source = message.source;
+	if (!source || typeof source !== "object") return false;
+	const value = source;
+	return value.kind === "plugin" && value.plugin === "@deepseek-ai/dsh-system-prompt" && value.form === "snapshot";
+}
 function messagesToQuery(messages) {
-	return messagesToText(messages);
+	return messagesToText(messages.filter((message) => !isRuntimeContextSnapshot(message)));
 }
 function messagesToUserPrompt(messages) {
 	return messagesToText(messages.filter((message) => {
