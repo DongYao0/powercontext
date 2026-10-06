@@ -182,7 +182,7 @@ describe('runRecallPreStep fail-open', () => {
     expect(request.mock.calls[0]).toEqual([
       'prepare_context',
       { scope_id: 'project:demo', query: 'Human request\n\nPlugin-provided context', max_bytes: 8000 },
-      undefined,
+      expect.any(AbortSignal),
     ])
     expect(request.mock.calls[1][0]).toBe('capture_content_source')
     expect(request.mock.calls[1][1]).toMatchObject({
@@ -438,6 +438,6 @@ it('forwards explicit assembly and delivers standard text intact', async () => {
     config: { ...config, contextAssembly: assembly, capturePrompts: false },
     wrapContent,
   }))
-  expect(request).toHaveBeenCalledWith('prepare_context', expect.objectContaining({ assembly }), undefined)
+  expect(request).toHaveBeenCalledWith('prepare_context', expect.objectContaining({ assembly }), expect.any(AbortSignal))
   expect(wrapContent.mock.calls[0][0].endsWith(content)).toBe(true)
 })

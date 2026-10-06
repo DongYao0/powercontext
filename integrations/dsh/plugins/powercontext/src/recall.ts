@@ -15,7 +15,7 @@
  */
 
 import type { UserMessage } from '@deepseek-ai/dsh-session'
-import type { PowerContextClient } from './client.ts'
+import { combineSignals, type PowerContextClient } from './client.ts'
 import type { ResolvedConfig } from './config.ts'
 import { captureUserPrompt } from './capture.ts'
 import { logSafely, reportFailure } from './diagnostics.ts'
@@ -155,8 +155,13 @@ export async function runRecallPreStep(input: RecallInput): Promise<PreStepDecis
     skipAll('downstream_rejected')
     return downstream
   }
-  if (input.signal?.aborted) {
-    skipAll(cancellationReason(input.signal))
+  const signal = combineSignals([
+    ...(input.signal ? [input.signal] : []),
+    AbortSignal.timeout(input.config.timeoutMs),
+  ])
+  const automaticInput = { ...input, signal }
+  if (signal.aborted) {
+    skipAll(cancellationReason(signal))
     return downstream
   }
   const messages = downstream.messages ?? []
@@ -170,15 +175,15 @@ export async function runRecallPreStep(input: RecallInput): Promise<PreStepDecis
     return downstream
   }
   const userPrompt = messagesToUserPrompt(messages)
-  const content = await recallThenCapture(input, query, userPrompt, observation)
+  const content = await recallThenCapture(automaticInput, query, userPrompt, observation)
   if (content) observation?.record('injection', { state: 'running' })
-  if (!content || input.signal?.aborted) {
-    observation?.skip('injection', input.signal?.aborted ? cancellationReason(input.signal)
+  if (!content || signal.aborted) {
+    observation?.skip('injection', signal.aborted ? cancellationReason(signal)
       : 'no_prepared_content')
     return downstream
   }
   try {
-    if (input.signal?.aborted) throw new TransportError('', input.signal.reason)
+    if (signal.aborted) throw new TransportError('', signal.reason)
     const decision = {
       ...downstream,
       messages: [...downstream.messages ?? [], input.wrapContent(formatUntrustedContext(content))],

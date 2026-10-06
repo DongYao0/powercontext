@@ -164,6 +164,20 @@ describe('registered automatic path', () => {
     expect(h.requests.map(({ path }) => path)).toEqual([SCOPE])
   })
 
+  it('starts the PowerContext deadline after a slow downstream hook admits the step', async () => {
+    const h = await fixture(successfulRequest, { timeoutMs: 20, requestTimeoutMs: 200 })
+    const next = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40))
+      return { kind: 'enter' as const, messages: [userMessage] }
+    }
+
+    const result = await h.run({ next })
+
+    expect(h.requests.map(({ path }) => path)).toEqual([SCOPE, PREPARE, CAPTURE])
+    expect(result.messages).toHaveLength(2)
+    expect(JSON.stringify(result.messages)).toContain(TEXT)
+  })
+
   it('keeps capture independent after a prepare request timeout', async () => {
     const h = await fixture((path, init) => path === PREPARE ? waitForAbort(init.signal!) : successfulRequest(path),
       { requestTimeoutMs: 20 })

@@ -3114,8 +3114,13 @@ async function runRecallPreStep(input) {
 		skipAll("downstream_rejected");
 		return downstream;
 	}
-	if (input.signal?.aborted) {
-		skipAll(cancellationReason(input.signal));
+	const signal = combineSignals([...input.signal ? [input.signal] : [], AbortSignal.timeout(input.config.timeoutMs)]);
+	const automaticInput = {
+		...input,
+		signal
+	};
+	if (signal.aborted) {
+		skipAll(cancellationReason(signal));
 		return downstream;
 	}
 	const messages = downstream.messages ?? [];
@@ -3128,14 +3133,14 @@ async function runRecallPreStep(input) {
 		skipAll("empty_input");
 		return downstream;
 	}
-	const content = await recallThenCapture(input, query, messagesToUserPrompt(messages), observation);
+	const content = await recallThenCapture(automaticInput, query, messagesToUserPrompt(messages), observation);
 	if (content) observation?.record("injection", { state: "running" });
-	if (!content || input.signal?.aborted) {
-		observation?.skip("injection", input.signal?.aborted ? cancellationReason(input.signal) : "no_prepared_content");
+	if (!content || signal.aborted) {
+		observation?.skip("injection", signal.aborted ? cancellationReason(signal) : "no_prepared_content");
 		return downstream;
 	}
 	try {
-		if (input.signal?.aborted) throw new TransportError("", input.signal.reason);
+		if (signal.aborted) throw new TransportError("", signal.reason);
 		const decision = {
 			...downstream,
 			messages: [...downstream.messages ?? [], input.wrapContent(formatUntrustedContext(content))]
@@ -3930,15 +3935,13 @@ function createRuntime(ctx, config) {
 }
 function registerRecall(ctx, runtime, createUserMessage) {
 	ctx.on("agent/pre-step", (async (payload, next) => {
-		const deadline = AbortSignal.timeout(runtime.config.timeoutMs);
-		const signal = combineSignals([payload.signal, deadline]);
 		return runRecallPreStep({
 			messages: payload.messages,
 			next,
 			cwd: payload.agent.session.header.cwd,
 			sessionId: payload.agent.session.header.id,
 			turnId: String(payload.turn),
-			signal,
+			signal: payload.signal,
 			client: runtime.client,
 			config: runtime.config,
 			resolveScope: runtime.resolveScope,
