@@ -88,6 +88,10 @@ liveness, readiness, capabilities, declared routes, the current Scope, and a rea
 A Scope failure leaves health results available. The endpoint summary shows only its origin, configuration source
 and whether a path prefix exists; credentials, prefix text, query strings and fragments are not printed.
 
+Doctor reports the active host's native MCP catalog separately. The documented DSH installation is HTTP-only, so
+`native_mcp_unconfigured` does not fail an otherwise healthy HTTP plugin. If other native MCP tools are visible
+but `mcp__powercontext__*` is absent, Doctor reports `native_mcp_powercontext_missing` with a recovery action.
+
 Each failed check identifies the operation, a stable code, HTTP status/request ID when available, and a recovery
 action. Protocol errors also include `protocol_issue`, identifying the violated JSON, status or PreparedContext field rule.
 Readiness retains recognized dependency statuses, including a 503 response. It never forwards raw Server

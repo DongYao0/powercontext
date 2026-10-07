@@ -85,6 +85,10 @@ Server 使用其他监听地址时同步修改 URL。鉴权使用 `POWERCONTEXT_
 路由声明、当前 Scope 和只读 prepare 操作。Scope 失败不会遮蔽健康检查。
 端点摘要仅显示 origin、配置来源和是否存在路径前缀，不打印凭据、前缀正文、查询参数或 fragment。
 
+Doctor 会单独报告当前宿主的原生 MCP 工具目录。文档中的 DSH 安装仍是仅 HTTP 的插件，因此
+`native_mcp_unconfigured` 不会使原本健康的 HTTP 插件检查失败。若已发现其他原生 MCP 工具但没有
+`mcp__powercontext__*`，Doctor 会报告 `native_mcp_powercontext_missing` 并给出恢复操作。
+
 失败项提供操作名、稳定 code、可用的 HTTP status/request ID 和具体恢复操作。
 协议错误还提供 `protocol_issue`，指出 JSON、状态码或 PreparedContext 字段违反的具体规则。
 Readiness 保留已识别的依赖状态，包括 HTTP 503 的检查结果，不透传 Server 原始错误文字和召回内容。

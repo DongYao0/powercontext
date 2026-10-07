@@ -36,6 +36,8 @@ Named `pc_*` tools expose the agent-safe Memory, handoff, experience, skill, and
 read-only prepare independently. Failures identify the operation, a specific code, available HTTP status/request ID,
 safe dependency statuses and recovery actions. The endpoint summary omits credentials and path text. A successful
 report does not prove capture or processing: write routes are declared by OpenAPI but never executed by Doctor.
+Doctor also reports native MCP catalog visibility separately. The documented DSH installation remains HTTP-only, so
+an unavailable or unconfigured native MCP catalog does not make the HTTP plugin health check fail.
 Standalone `powercontext doctor dsh` verifies Web-profile registration and explicitly cannot observe the running
 host's overrides. A healthy Server with extraction disabled may return valid empty recall.
 
