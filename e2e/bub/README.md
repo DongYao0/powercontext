@@ -325,9 +325,36 @@ Each arm writes `observation.json`, which includes the per-session Server snapsh
 ```
 
 The report states the host, its version, the model, and the reasoning settings. The command exits non-zero when any
-arm could not be scored; a task that fails in either arm is a result, not a command failure. The report is marked
-preliminary. It does not yet estimate uncertainty, check the Default Scope for
-leaks, record latency or token usage, or run in the fixed Compose harness.
+arm could not be scored; a task that fails in either arm is a result, not a command failure.
+
+For each workload and over all of them, the report gives:
+
+- Each arm's passed and scored runs, its success rate with a 95% Wilson score interval, and the runs left out as
+  errors or integration failures.
+- The mean ON minus OFF score over the trials in which both arms were scored, with a 95% percentile bootstrap
+  interval over those pairs (10,000 resamples from a fixed seed, so the same evidence gives the same interval), and
+  how many pairs only ON passed, only OFF passed, or tied.
+- Per step and arm, over the same scored runs: the agent's execution time as Harbor measured it, and the input
+  tokens, the cached input tokens among them, output tokens, and cost that Harbor's agent for that host records.
+  Claude Code, OpenCode, and Pi report their own cost; for Codex, Harbor estimates it from its price table and leaves
+  it out for a model the table lacks. A timed-out run is scored, so its time counts. Bub reports no usage at all,
+  because Harbor reads it from the ACP prompt response and `bub-acp-server` leaves it out (bubbuild/bub-contrib#78),
+  so those cells show `n/a`.
+- The Server's usage for the ON arm, as a mean over each scored run's final Scope snapshot: generation and embedding
+  requests and tokens, and the Server's own estimate of the tokens of context it returned. The Server has no price
+  list, so there is no Server cost. OFF runs have no Scope. A timed-out ON run keeps the snapshots it reached, so
+  its usage is that of the sessions that ran; the report states how many runs the mean covers.
+
+Each step figure and Server token count is a mean over the runs that reported it, so the harness never counts a
+missing figure as zero. Runs can differ: Harbor reads a step's usage from the host's own output, so a step whose host
+recorded none has no figures, and the Server leaves a Scope's tokens unknown when a model provider did not report
+them. A timed-out step keeps the usage its host recorded before it was stopped, as it keeps its time. Harbor's agents
+for Pi, Claude Code, Codex, and OpenCode do record 0 for a token count missing from a log the host wrote, and the
+report cannot tell that from a real 0. The report shows `n/a` when no run reported a figure and adds its count, as in
+`1,000 (1 of 2 runs)`, when only some did; `paired-report.json` keeps the count of every figure.
+
+The report is marked preliminary. With two trials the intervals are wide, which is the point: they show how little
+such a pilot can say. The command does not yet check the Default Scope for leaks or run in the fixed Compose harness.
 
 ## Long-horizon task
 
