@@ -19,13 +19,14 @@ from __future__ import annotations
 import asyncio
 import runpy
 import shutil
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from harbor.models.agent.context import AgentContext
 from harbor.models.task.task import Task as HarborTask
-from harbor.models.trial.result import StepResult
+from harbor.models.trial.result import StepResult, TimingInfo
 from harbor.models.verifier.result import VerifierResult
 from powercontext.client import UnauthorizedResponseError
 
@@ -33,10 +34,12 @@ from powercontext_e2e import paired as paired_module
 from powercontext_e2e.catalog import load_tasks
 from powercontext_e2e.models import (
     HarborTrialObservation,
+    MetricSummary,
     PairedAgent,
     PairedArmObservation,
     RunEnvironment,
     SessionSnapshot,
+    StepObservation,
 )
 from powercontext_e2e.paired import (
     UnauthenticatedServerError,
@@ -44,9 +47,11 @@ from powercontext_e2e.paired import (
     classify_outcome,
     recall_session_index,
     require_authenticated_server,
+    step_observations,
     summarize,
     treatment_failures,
 )
+from powercontext_e2e.report import render_paired_report
 from powercontext_e2e.runner import run_tasks
 from powercontext_e2e.sessions import SessionRecorder, settle_session
 from powercontext_e2e.settings import HarnessSettings
@@ -216,7 +221,15 @@ def test_outcome_classification(kwargs, outcome: str) -> None:
     assert classify_outcome(**arguments) == outcome
 
 
-def _observation(trial: int, arm: str, outcome: str, task_id: str = "task") -> PairedArmObservation:
+def _observation(
+    trial: int,
+    arm: str,
+    outcome: str,
+    task_id: str = "task",
+    *,
+    steps: tuple[StepObservation, ...] = (),
+    sessions: tuple[SessionSnapshot, ...] = (),
+) -> PairedArmObservation:
     now = datetime.now(UTC)
     return PairedArmObservation(
         run_id=f"{task_id}-{trial}-{arm}",
@@ -234,6 +247,8 @@ def _observation(trial: int, arm: str, outcome: str, task_id: str = "task") -> P
         ),
         harbor=HarborTrialObservation(),
         outcome=outcome,
+        steps=steps,
+        sessions=sessions,
     )
 
 
@@ -267,7 +282,195 @@ def test_summary_reports_no_difference_without_a_scored_pair() -> None:
 
     assert report.total.pairs == 0
     assert report.total.mean_delta is None
+    assert report.total.delta_interval is None
     assert report.total.off.errors == 1
+    assert report.total.off.success_rate is None
+    assert report.total.off.success_rate_interval is None
+
+
+def test_summary_reports_intervals_and_which_arm_won_each_pair() -> None:
+    report = summarize(
+        (
+            _observation(1, "off", "failed"),
+            _observation(1, "on", "passed"),
+            _observation(2, "off", "passed"),
+            _observation(2, "on", "passed"),
+            _observation(3, "off", "passed"),
+            _observation(3, "on", "failed"),
+        ),
+        trials=3,
+        agent=_AGENT,
+    )
+
+    total = report.total
+    assert (total.on_better, total.off_better, total.tied) == (1, 1, 1)
+    assert total.mean_delta == 0
+    assert total.delta_interval is not None
+    # Resampling three pairs with scores -1, 0, and +1 reaches both extremes.
+    assert (total.delta_interval.low, total.delta_interval.high) == (-1, 1)
+    assert total.off.success_rate == pytest.approx(2 / 3)
+    assert total.off.success_rate_interval is not None
+    assert total.off.success_rate_interval.low < 2 / 3 < total.off.success_rate_interval.high
+
+
+def _step(name: str, *, seconds: float | None, tokens: int | None = None) -> StepObservation:
+    return StepObservation(
+        name=name,
+        seconds=seconds,
+        input_tokens=tokens,
+        cache_tokens=None if tokens is None else tokens // 2,
+        output_tokens=None if tokens is None else 10,
+        cost_usd=None if tokens is None else tokens / 1_000_000,
+    )
+
+
+def test_summary_step_metrics_cover_the_scored_runs_and_the_metrics_a_host_reports() -> None:
+    report = summarize(
+        (
+            _observation(
+                1, "off", "failed", steps=(_step("capture", seconds=4), _step("recall", seconds=2, tokens=6000))
+            ),
+            _observation(
+                1, "on", "passed", steps=(_step("capture", seconds=6), _step("recall", seconds=5, tokens=30000))
+            ),
+            # A timed-out run is scored, so its time counts; a host that reports no usage leaves those metrics out.
+            _observation(2, "off", "timeout", steps=(_step("capture", seconds=600), _step("recall", seconds=8))),
+            # An error is not a scored run, so none of its figures count.
+            _observation(2, "on", "error", steps=(_step("capture", seconds=1, tokens=1), _step("recall", seconds=1))),
+        ),
+        trials=2,
+        agent=_AGENT,
+    )
+
+    off, on = report.total.off, report.total.on
+    assert list(off.steps) == ["capture", "recall"]
+    assert (off.steps["capture"].runs, off.steps["capture"].seconds.runs) == (2, 2)
+    assert (off.steps["capture"].seconds.mean, off.steps["capture"].seconds.max) == (302, 600)
+    assert off.steps["capture"].input_tokens is None
+    assert (off.steps["recall"].input_tokens.runs, off.steps["recall"].input_tokens.mean) == (1, 6000)
+    assert on.steps["recall"].input_tokens.mean == 30000
+    assert on.steps["capture"].input_tokens is None
+
+
+def test_summary_server_usage_comes_from_each_scored_on_runs_final_snapshot() -> None:
+    def usage(session: int, *, generation: int, recalled: int) -> SessionSnapshot:
+        return _snapshot(session, asked=1).model_copy(
+            update={
+                "generation_requests": generation,
+                "generation_input_tokens": generation * 1000,
+                "recalled_tokens": recalled,
+            }
+        )
+
+    report = summarize(
+        (
+            _observation(1, "off", "failed"),
+            _observation(
+                1, "on", "passed", sessions=(usage(0, generation=1, recalled=0), usage(1, generation=3, recalled=1000))
+            ),
+            _observation(2, "off", "failed"),
+            _observation(
+                2, "on", "failed", sessions=(usage(0, generation=1, recalled=0), usage(1, generation=5, recalled=2000))
+            ),
+            _observation(3, "off", "failed"),
+            _observation(3, "on", "integration_failed", sessions=(usage(0, generation=99, recalled=99),)),
+        ),
+        trials=3,
+        agent=_AGENT,
+    )
+
+    assert report.total.off.server is None
+    server = report.total.on.server
+    assert server is not None
+    assert (server.runs, server.generation_requests) == (2, 4)
+    assert server.generation_input_tokens == MetricSummary(runs=2, mean=4000, min=3000, max=5000)
+    assert (server.embedding_requests, server.embedding_input_tokens, server.recalled_tokens) == (0, None, 1500)
+
+
+def test_step_observations_take_time_and_usage_from_harbor() -> None:
+    started = datetime(2026, 10, 4, 18, 20, 40, tzinfo=UTC)
+    steps = (
+        StepResult(
+            step_name="capture",
+            agent_execution=TimingInfo(started_at=started, finished_at=started + timedelta(seconds=7.5)),
+            agent_result=AgentContext(n_input_tokens=4599, n_cache_tokens=3264, n_output_tokens=127, cost_usd=0.0016),
+        ),
+        StepResult(step_name="recall", agent_execution=TimingInfo(started_at=started), agent_result=AgentContext()),
+    )
+
+    capture, recall = step_observations(steps)
+
+    assert capture == StepObservation(
+        name="capture", seconds=7.5, input_tokens=4599, cache_tokens=3264, output_tokens=127, cost_usd=0.0016
+    )
+    assert recall == StepObservation(name="recall")
+
+
+def test_paired_report_renders_intervals_a_step_table_and_server_usage() -> None:
+    report = summarize(
+        (
+            _observation(1, "off", "failed", steps=(_step("recall", seconds=3.5, tokens=6600),)),
+            _observation(
+                1,
+                "on",
+                "passed",
+                steps=(_step("recall", seconds=4.3), _step("flush", seconds=1)),
+                sessions=(_snapshot(0, asked=1),),
+            ),
+            _observation(2, "off", "failed", steps=(_step("recall", seconds=3.5, tokens=6400),)),
+            # A scored run without a Scope snapshot is left out of the Server mean, and the report says so.
+            _observation(2, "on", "timeout", steps=(_step("recall", seconds=4.3),)),
+        ),
+        trials=2,
+        agent=_AGENT,
+    )
+
+    rendered = render_paired_report(report)
+
+    assert "- OFF: 0/2 passed, 0% [0%, 66%] (0 timed out)" in rendered
+    assert "- ON: 1/2 passed, 50% [9%, 91%] (1 timed out)" in rendered
+    assert "ON minus OFF: +0.50 [+0.00, +1.00]; ON better in 1, OFF better in 0, tied in 1" in rendered
+    assert "| recall | OFF | 2 | 3.5 (3.5-3.5) | 6,500 | 3,250 | 10 | 0.0065 |" in rendered
+    assert "| recall | ON | 2 | 4.3 (4.3-4.3) | n/a | n/a | n/a | n/a |" in rendered
+    # A step only one arm ran gets that arm's row alone.
+    assert "| flush | ON | 1 | 1.0 (1.0-1.0) | n/a | n/a | n/a | n/a |" in rendered
+    assert "| flush | OFF" not in rendered
+    assert (
+        "Server usage, mean over 1 scored ON run(s): generation 0.0 request(s), input tokens n/a, output tokens n/a"
+    ) in rendered
+
+
+def test_paired_report_gives_the_runs_behind_a_mean_only_some_runs_reported() -> None:
+    def snapshot(tokens: int | None) -> SessionSnapshot:
+        return _snapshot(0, asked=1).model_copy(
+            update={"generation_requests": 1, "generation_input_tokens": tokens, "generation_output_tokens": tokens}
+        )
+
+    report = summarize(
+        (
+            # Both OFF runs are scored, but the timed-out one's host recorded no usage.
+            _observation(1, "off", "passed", steps=(_step("recall", seconds=2, tokens=1000),)),
+            _observation(2, "off", "timeout", steps=(_step("recall", seconds=600),)),
+            # The Server leaves a Scope's tokens unknown when a provider did not report them.
+            _observation(1, "on", "passed", sessions=(snapshot(800),)),
+            _observation(2, "on", "passed", sessions=(snapshot(None),)),
+        ),
+        trials=2,
+        agent=_AGENT,
+    )
+
+    server = report.total.on.server
+    assert server is not None
+    assert server.generation_input_tokens == MetricSummary(runs=1, mean=800, min=800, max=800)
+    rendered = render_paired_report(report)
+    assert (
+        "| recall | OFF | 2 | 301.0 (2.0-600.0) | 1,000 (1 of 2 runs) | 500 (1 of 2 runs) | 10 (1 of 2 runs) | "
+        "0.0010 (1 of 2 runs) |"
+    ) in rendered
+    assert (
+        "Server usage, mean over 2 scored ON run(s): generation 1.0 request(s), input tokens 800 (1 of 2 runs), "
+        "output tokens 800 (1 of 2 runs);"
+    ) in rendered
 
 
 class _FlushingClient:
@@ -290,7 +493,13 @@ class _FlushingClient:
                 sources=SimpleNamespace(total=3, memory_pending=0),
                 memory=SimpleNamespace(entries=SimpleNamespace(total=2)),
             ),
-            recall=SimpleNamespace(totals=SimpleNamespace(preparations=4, ready_preparations=1)),
+            usage=SimpleNamespace(
+                totals=SimpleNamespace(
+                    generation=SimpleNamespace(requests=3, input_tokens=9870, output_tokens=640),
+                    embedding=SimpleNamespace(requests=5, input_tokens=1210, output_tokens=None),
+                )
+            ),
+            recall=SimpleNamespace(totals=SimpleNamespace(preparations=4, ready_preparations=1, recalled_tokens=1180)),
         )
 
 
@@ -308,6 +517,12 @@ def test_settling_flushes_until_the_scope_is_caught_up() -> None:
         memory_entries=2,
         preparations=4,
         ready_preparations=1,
+        generation_requests=3,
+        generation_input_tokens=9870,
+        generation_output_tokens=640,
+        embedding_requests=5,
+        embedding_input_tokens=1210,
+        recalled_tokens=1180,
     )
 
 

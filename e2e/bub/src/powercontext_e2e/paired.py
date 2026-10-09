@@ -34,12 +34,16 @@ from .models import (
     ArmOutcome,
     ArmSummary,
     HarborTrialObservation,
+    MetricSummary,
     PairedAgent,
     PairedArmObservation,
     PairedReport,
     PairedSummary,
     PairedTaskSummary,
+    ServerUsageSummary,
     SessionSnapshot,
+    StepObservation,
+    StepSummary,
 )
 from .report import render_paired_report
 from .runner import (
@@ -52,9 +56,10 @@ from .runner import (
 )
 from .sessions import SessionRecorder
 from .settings import HarnessSettings
+from .stats import bootstrap_mean_interval, wilson_interval
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
     from pathlib import Path
 
     from harbor.models.trial.result import StepResult
@@ -247,6 +252,7 @@ async def _run_arm(
         scope_id=scope_id,
         harbor=harbor,
         step_rewards=step_rewards(step_results),
+        steps=step_observations(step_results),
         outcome=arm_outcome(
             step_results,
             harbor,
@@ -300,6 +306,33 @@ def step_rewards(step_results: Sequence[StepResult]) -> dict[str, float]:
         and step.verifier_result.rewards
         and "reward" in step.verifier_result.rewards
     }
+
+
+def step_observations(step_results: Sequence[StepResult]) -> tuple[StepObservation, ...]:
+    """Record each step's agent time and the host's own token and cost figures, as Harbor reports them.
+
+    Harbor's installed agents read usage from the host's own output, so a host that reports nothing leaves the
+    figures absent rather than zero.
+    """
+
+    observations: list[StepObservation] = []
+    for step in step_results:
+        timing = step.agent_execution
+        seconds = None
+        if timing is not None and timing.started_at is not None and timing.finished_at is not None:
+            seconds = max((timing.finished_at - timing.started_at).total_seconds(), 0.0)
+        context = step.agent_result
+        observations.append(
+            StepObservation(
+                name=step.step_name,
+                seconds=seconds,
+                input_tokens=None if context is None else context.n_input_tokens,
+                cache_tokens=None if context is None else context.n_cache_tokens,
+                output_tokens=None if context is None else context.n_output_tokens,
+                cost_usd=None if context is None else context.cost_usd,
+            )
+        )
+    return tuple(observations)
 
 
 def treatment_failures(sessions: Sequence[SessionSnapshot], recall_session: int) -> tuple[str, ...]:
@@ -381,15 +414,64 @@ def _summary(observations: Sequence[PairedArmObservation]) -> PairedSummary:
         on=_arm_summary([o for o in observations if o.arm == "on"]),
         pairs=len(deltas),
         mean_delta=fmean(deltas) if deltas else None,
+        delta_interval=bootstrap_mean_interval(deltas),
+        on_better=sum(delta > 0 for delta in deltas),
+        off_better=sum(delta < 0 for delta in deltas),
+        tied=deltas.count(0),
     )
 
 
 def _arm_summary(observations: Sequence[PairedArmObservation]) -> ArmSummary:
+    """Summarize one arm; the metrics cover the same scored runs as the success rate, timeouts included."""
+
     outcomes = [observation.outcome for observation in observations]
+    scored = [observation for observation in observations if observation.outcome in SCORES]
+    passed = outcomes.count("passed")
     return ArmSummary(
-        scored=sum(outcome in SCORES for outcome in outcomes),
-        passed=outcomes.count("passed"),
+        scored=len(scored),
+        passed=passed,
         timeouts=outcomes.count("timeout"),
         errors=outcomes.count("error"),
         integration_failures=outcomes.count("integration_failed"),
+        success_rate=passed / len(scored) if scored else None,
+        success_rate_interval=wilson_interval(passed, len(scored)),
+        steps=_step_summaries(scored),
+        server=_server_usage(scored),
+    )
+
+
+def _step_summaries(scored: Sequence[PairedArmObservation]) -> dict[str, StepSummary]:
+    summaries: dict[str, StepSummary] = {}
+    for name in dict.fromkeys(step.name for observation in scored for step in observation.steps):
+        steps = [step for observation in scored for step in observation.steps if step.name == name]
+        summaries[name] = StepSummary(
+            runs=len(steps),
+            seconds=_metric(step.seconds for step in steps),
+            input_tokens=_metric(step.input_tokens for step in steps),
+            cache_tokens=_metric(step.cache_tokens for step in steps),
+            output_tokens=_metric(step.output_tokens for step in steps),
+            cost_usd=_metric(step.cost_usd for step in steps),
+        )
+    return summaries
+
+
+def _metric(values: Iterable[float | int | None]) -> MetricSummary | None:
+    known = [float(value) for value in values if value is not None]
+    if not known:
+        return None
+    return MetricSummary(runs=len(known), mean=fmean(known), min=min(known), max=max(known))
+
+
+def _server_usage(scored: Sequence[PairedArmObservation]) -> ServerUsageSummary | None:
+    finals = [max(observation.sessions, key=lambda s: s.session) for observation in scored if observation.sessions]
+    if not finals:
+        return None
+    return ServerUsageSummary(
+        runs=len(finals),
+        generation_requests=fmean(snapshot.generation_requests for snapshot in finals),
+        generation_input_tokens=_metric(snapshot.generation_input_tokens for snapshot in finals),
+        generation_output_tokens=_metric(snapshot.generation_output_tokens for snapshot in finals),
+        embedding_requests=fmean(snapshot.embedding_requests for snapshot in finals),
+        embedding_input_tokens=_metric(snapshot.embedding_input_tokens for snapshot in finals),
+        recalled_tokens=fmean(snapshot.recalled_tokens for snapshot in finals),
     )
