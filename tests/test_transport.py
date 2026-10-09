@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import ssl
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -231,10 +232,39 @@ def test_owned_client_bypasses_process_proxy_for_loopback(monkeypatch: pytest.Mo
         thread.join(timeout=5)
 
 
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost"])
+def test_owned_client_preserves_custom_ca_for_loopback_https(monkeypatch: pytest.MonkeyPatch, host: str) -> None:
+    cert = Path(__file__).resolve().parent / "fixtures" / "loopback_test_ca.pem"
+    monkeypatch.setenv("SSL_CERT_FILE", str(cert))
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.setenv(name, "http://127.0.0.1:9")
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _HealthHandler)
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.load_cert_chain(cert)
+    server.socket = tls.wrap_socket(server.socket, server_side=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+
+        async def request() -> str:
+            async with PowerContextClient(f"https://{host}:{server.server_port}", timeout=1) as client:
+                return (await client.get_liveness()).status
+
+        assert asyncio.run(request()) == "ok"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_owned_client_keeps_process_proxy_for_remote_targets(monkeypatch: pytest.MonkeyPatch) -> None:
     _HealthHandler.requested_paths = []
     proxy, thread, proxy_url = _serve_health()
     monkeypatch.setenv("HTTP_PROXY", proxy_url)
+    monkeypatch.setenv("http_proxy", proxy_url)
     monkeypatch.delenv("NO_PROXY", raising=False)
     monkeypatch.delenv("no_proxy", raising=False)
     try:
