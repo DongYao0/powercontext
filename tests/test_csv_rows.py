@@ -17,7 +17,9 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import itertools
 import json
+from typing import Literal
 
 import pytest
 
@@ -26,6 +28,7 @@ from powercontext.sources import (
     SourceDefinitionRegistry,
     SourceMaterialization,
     TextEvidence,
+    project_source_for_transport,
 )
 from powercontext.sources.csv_rows import (
     CSV_ROW_SOURCE_DEFINITION,
@@ -195,3 +198,143 @@ def test_resolve_rechecks_mutated_inputs_before_creating_a_source() -> None:
     registry = SourceDefinitionRegistry((CSV_ROW_SOURCE_DEFINITION,))
     with pytest.raises(ValueError):
         asyncio.run(registry.resolve(row))
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"primary_key_value": "new", "values": ("new", "updated")},
+        {"document_id": "other"},
+        {"source_id": "csv:other:key"},
+        {"name": "csv:other:key"},
+        {"materialization": SourceMaterialization.REFERENCED},
+        {"values": ("key",)},
+    ],
+)
+def test_read_projection_and_transport_reject_sources_mutated_after_validation(changes: dict[str, object]) -> None:
+    row = CSVRowInput(
+        document_id="doc", primary_key="id", primary_key_value="key", columns=("id", "name"), values=("key", "value")
+    )
+    registry = SourceDefinitionRegistry((CSV_ROW_SOURCE_DEFINITION,))
+    source = asyncio.run(registry.resolve(row)).model_copy(update=changes)
+    with pytest.raises(ValueError):
+        asyncio.run(registry.read(source))
+    with pytest.raises(ValueError):
+        registry.project(source, TEXT_EVIDENCE_PROJECTION_KEY)
+    with pytest.raises(ValueError):
+        project_source_for_transport(registry, source)
+
+
+@pytest.mark.parametrize(
+    ("line_ending", "quoting"),
+    [("\n", csv.QUOTE_ALL), ("\r", csv.QUOTE_ALL), ("\r\n", csv.QUOTE_ALL), ("\r\n", csv.QUOTE_MINIMAL)],
+)
+def test_generated_csv_records_preserve_each_character_and_column_position(
+    line_ending: str, quoting: Literal[0, 1]
+) -> None:
+    fields = [
+        "",
+        " ",
+        "001",
+        "false",
+        "null",
+        "a,b",
+        'a"b',
+        "a\\b",
+        "\r",
+        "\n",
+        "\r\n",
+        "\n\n",
+        "汉字",
+        "😀",
+        "é",
+        "é",
+        "\ufeff",
+        "a\x00b",
+        "\u2028",
+        "\u0085",
+    ]
+    columns = ("z", " id ", "名称", "last")
+    registry = SourceDefinitionRegistry((CSV_ROW_SOURCE_DEFINITION,))
+
+    async def check_records() -> None:
+        for index, (first, second) in enumerate(itertools.product(fields, repeat=2)):
+            primary_key_index = index % len(columns)
+            values = [first, second, "literal", ""]
+            values[primary_key_index] = f" key:{index}/% "
+            output = io.StringIO(newline="")
+            csv.writer(output, lineterminator=line_ending, quoting=quoting).writerows([columns, values])
+            content = output.getvalue().encode()
+            if index % 2:
+                content = b"\xef\xbb\xbf" + content
+            (row,) = parse_csv_document(
+                CSVDocumentInput(document_id="generated", primary_key=columns[primary_key_index], content=content)
+            )
+            assert row.columns == columns
+            assert row.values == tuple(values)
+            source = await registry.resolve(row)
+            assert await registry.read(source) == row
+            evidence = TextEvidence.model_validate(registry.project(source, TEXT_EVIDENCE_PROJECTION_KEY))
+            assert evidence.content == json.dumps(
+                dict(zip(columns, values, strict=True)), ensure_ascii=False, separators=(",", ":")
+            )
+
+    asyncio.run(check_records())
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (b'id,note\n1,unquoted"quote\n', 'unquoted"quote'),
+        (b'id,note\n1, "quoted"\n', ' "quoted"'),
+        (b'id,note\n1,"a""b"\n', 'a"b'),
+        (b'id,note\n1,""""\n', '"'),
+        (b'id,note\n1,"a\n\nb"\n', "a\n\nb"),
+        (b"id,note\n1,back\\slash\n", "back\\slash"),
+        (b"id,note\n1,\xef\xbb\xbfinside\n", "\ufeffinside"),
+    ],
+)
+def test_csv_quote_rules_match_standard_reader_without_extra_cleanup(content: bytes, expected: str) -> None:
+    (row,) = parse_csv_document(CSVDocumentInput(document_id="quoting", primary_key="id", content=content))
+    assert row.values == ("1", expected)
+
+
+@pytest.mark.parametrize("invalid", [b"\xc0\xaf", b"\xed\xa0\x80", b"\xe4\xb8", b"\xf4\x90\x80\x80"])
+def test_invalid_utf8_forms_fail_after_a_valid_prefix(invalid: bytes) -> None:
+    with pytest.raises(ValueError):
+        parse_csv_document(
+            CSVDocumentInput(document_id="encoding", primary_key="id", content=b"id,note\n1,valid\n2," + invalid)
+        )
+
+
+def test_short_csv_quote_combinations_match_strict_standard_reader() -> None:
+    for length in range(6):
+        for characters in itertools.product('a," \\', repeat=length):
+            content = "id,note\nkey," + "".join(characters) + "\n"
+            document = CSVDocumentInput(document_id="syntax", primary_key="id", content=content.encode())
+            try:
+                reference = list(csv.reader(io.StringIO(content, newline=""), strict=True))
+            except csv.Error:
+                with pytest.raises(ValueError):
+                    parse_csv_document(document)
+                continue
+            if len(reference[1]) != 2:
+                with pytest.raises(ValueError):
+                    parse_csv_document(document)
+                continue
+            (row,) = parse_csv_document(document)
+            assert row.values == tuple(reference[1])
+
+
+@pytest.mark.parametrize("size", [131072, 131073])
+def test_large_field_boundary_follows_standard_csv_reader(size: int) -> None:
+    content = "id,note\nkey," + "x" * size + "\n"
+    document = CSVDocumentInput(document_id="large-field", primary_key="id", content=content.encode())
+    try:
+        reference = list(csv.reader(io.StringIO(content, newline=""), strict=True))
+    except csv.Error:
+        with pytest.raises(ValueError):
+            parse_csv_document(document)
+    else:
+        (row,) = parse_csv_document(document)
+        assert row.values == tuple(reference[1])

@@ -112,6 +112,25 @@ Applications can use PowerContext through the async Python client, HTTP API, MCP
 
 Explore the [22 Chinese Jupyter tutorials and a complete team workflow](examples/jupyter/README.md) to run Memory, context preparation, Handoff, Experience, Skill, and a real Agent step by step. The first seven tutorials need no model or API key.
 
+## Capture offline CSV records
+
+`powercontext.sources.csv_rows` validates complete UTF-8 CSV documents and captures each row with a stable document-and-primary-key identity. It preserves header order and original string values, including whitespace, empty fields, and embedded newlines.
+
+```python
+from powercontext.sources.csv_rows import CSVDocumentInput, parse_csv_document
+
+rows = parse_csv_document(
+    CSVDocumentInput(
+        document_id="airports",
+        primary_key="id",
+        content=b"id,name\n001,Airport East\n",
+    )
+)
+assert rows[0].primary_key_value == "001"
+```
+
+Register `CSV_ROW_SOURCE_DEFINITION` with a `SourceDefinitionRegistry` to resolve and read rows and generate standard `powercontext.text-evidence` projections. Use `manifest_for_definition` and `project_source_for_transport` to submit captured observations through the existing Runtime ingestion interface. Parsing and projection run offline without model calls. Invalid documents raise `ValueError` before returning any rows; CSV field-size limits follow the standard library's current configuration.
+
 ## What changes with PowerContext
 
 ![Compact comparison of PowerContext results on LoCoMo and SWE-bench Pro](docs/assets/readme-benchmark-summary.svg)

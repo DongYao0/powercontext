@@ -65,7 +65,7 @@ import sys
 
 from powercontext.builtin.artifacts.memory import MemoryCitation
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
-from powercontext.builtin.runtime import BuiltinConfig, GetMemoryEntryRequest, open_builtin_contexts, open_builtin_runtime
+from powercontext.builtin.runtime import BuiltinConfig, GetMemoryEntryRequest, SearchMemoryRequest, open_builtin_contexts, open_builtin_runtime
 from powercontext.sources import TEXT_EVIDENCE_PROJECTION_KEY
 
 state = json.load(sys.stdin)
@@ -79,6 +79,9 @@ async def read():
             entry = await memory.get(GetMemoryEntryRequest(citation=citation))
             assert entry.entry.text == state["evidence"][source_id]["content"]
             assert entry.entry.sources[0].source_id == source_id
+            query = json.loads(entry.entry.text)["z"]
+            search = await memory.search(SearchMemoryRequest(query=query, mode="fts", limit=10))
+            assert any(hit.entry_version_id == citation.entry_version_id for hit in search.hits)
     async with open_builtin_contexts(config) as contexts:
         entries = await (await contexts.get(state["scope_id"])).sources.journal.entries()
         assert len(entries) == len(state["evidence"])
@@ -137,6 +140,14 @@ def test_unicode_rows_and_each_exact_citation_survive_reopening_sqlite(tmp_path:
 
         citations: dict[str, MemoryCitation] = {}
         async with open_builtin_runtime(config, candidate_pipeline=RowEvidencePipeline()) as runtime:
+            # Reordering a replay after restart must not duplicate or change captured rows.
+            for row in reversed(rows):
+                source = await registry.resolve(row)
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
             memory = runtime.memory.for_scope(scope.scope_id)
             processed = 0
             for _ in range(len(rows) + 1):

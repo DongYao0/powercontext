@@ -22,7 +22,7 @@ import json
 from typing import Self
 from urllib.parse import quote
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from powercontext.limits import MAX_SOURCE_ID_LENGTH
 from powercontext.sources.definitions import SourceDefinition, SourceProjection
@@ -114,6 +114,8 @@ class CSVRowInput(BaseModel):
 class CSVRowSource(Source):
     """A captured record whose complete fields can be read without its original CSV."""
 
+    model_config = ConfigDict(revalidate_instances="always")
+
     source_id: str
     document_id: str
     primary_key: str
@@ -189,6 +191,7 @@ class _CSVRowDefinition:
         )
 
     async def read(self, source: CSVRowSource, /) -> CSVRowInput:
+        source = CSVRowSource.model_validate(source)
         return CSVRowInput(
             document_id=source.document_id,
             primary_key=source.primary_key,
@@ -205,7 +208,7 @@ class _CSVRowTextEvidenceProjection:
     output_class: type[BaseModel] = TextEvidence
 
     def project(self, source: CSVRowSource, /) -> TextEvidence:
-        _validate_row(source.document_id, source.primary_key, source.primary_key_value, source.columns, source.values)
+        source = CSVRowSource.model_validate(source)
         row = dict(zip(source.columns, source.values, strict=True))
         return TextEvidence(
             source_type="csv-row",
