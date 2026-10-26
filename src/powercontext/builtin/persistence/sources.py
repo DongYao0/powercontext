@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from powercontext.builtin.artifacts.experience import EXPERIENCE_INCUBATION_CURSOR_NAME
 from powercontext.builtin.artifacts.profile.models import PROFILE_SOURCE_WINDOW_BINDING
 from powercontext.builtin.artifacts.topic_memory import TOPIC_MEMORY_SOURCE_WINDOW_BINDING
-from powercontext.builtin.persistence.codec import load_model, stored_bytes
+from powercontext.builtin.persistence.codec import dump_model, load_model, stored_bytes
 from powercontext.builtin.persistence.errors import (
     IdentityMismatchError,
     InvalidRepositoryArgumentError,
@@ -399,7 +399,7 @@ class SourceRepository:
         source_type: str,
         envelope: _StoredSourcePayload,
     ) -> tuple[Source, SourceRef]:
-        payload = rfc8785.dumps(envelope.value)
+        payload = _JSON_OBJECT.dump_json(envelope.value)
         if envelope.representation == "observation":
             source = load_model(
                 SourceObservation,
@@ -454,7 +454,10 @@ def _dump_source(
             representation=representation,
             value=_JSON_OBJECT.validate_python(source.model_dump(mode="json", by_alias=True)),
         )
-        return rfc8785.dumps(envelope.model_dump(mode="json"))
+        # Validate canonical JSON compatibility without sorting captured field order.
+        # Idempotency compares decoded Source values rather than serialized bytes.
+        rfc8785.dumps(envelope.model_dump(mode="json"))
+        return dump_model(envelope, kind="source-envelope", name=name)
     except (TypeError, ValueError) as error:
         raise InvalidStoredPayloadError("source", name, "value is not JSON serializable") from error
 
