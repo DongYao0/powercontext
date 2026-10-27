@@ -1,0 +1,27 @@
+{
+  "round_number": 1,
+  "host_message": "欢迎阿强上场！本场辩题是「珍珠是否应拥有投票权」，你的立场是反对，对手是逻辑怪。本局共三个回合，每回合你可以直接开口，也可以选嘴硬到底、改口解释、甩个离谱新论点。你这一句「珍珠没有手，所以不应该拥有投票权」倒是说得干脆，先记在节目单上。",
+  "opponent_message": "远程投票需要的是身份确认，不是手；你的手机也没有手，照样天天投票。",
+  "follow_up_question": "那么没有手的人或物，是否也不该拥有投票权？",
+  "available_actions": [
+    "double_down",
+    "switch_explain",
+    "wild_card",
+    "free_input"
+  ],
+  "absurdity_score": 58,
+  "persona_delta": {
+    "previous": null,
+    "current": "一本正经型选手",
+    "reason": "开场就给出一条明确的因果链，态度认真，但这条因果本身在游戏内已经被对手抓住破绽。"
+  },
+  "quote_candidate": "珍珠没有手，所以不应该拥有投票权。",
+  "memory_candidate": {
+    "kind": "stance",
+    "text": "阿强在「珍珠是否应拥有投票权」一局选择反对，核心理由是没有手就不能投票。",
+    "reason": "属于与游戏直接相关的立场与理由，后续同类辩题可用来做立场对比。"
+  },
+  "used_card_ids": [
+    "pearl-voting-rights-against-logic-01"
+  ]
+}
