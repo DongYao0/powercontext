@@ -1,0 +1,1372 @@
+diff --git a/backend/src/goalflow/api/app.py b/backend/src/goalflow/api/app.py
+index 026ec29c..68d206a9 100644
+--- a/backend/src/goalflow/api/app.py
++++ b/backend/src/goalflow/api/app.py
+@@ -12,6 +12,7 @@ from goalflow.api.routes import (
+     auth,
+     capability_configs,
+     checkins,
++    context_manifests,
+     conversations,
+     goal_links,
+     goals,
+@@ -46,5 +47,6 @@ def create_app() -> FastAPI:
+     app.include_router(model_configs.router)
+     app.include_router(checkins.router)
+     app.include_router(memory.router)
++    app.include_router(context_manifests.router)
+
+     return app
+diff --git a/backend/src/goalflow/api/routes/context_manifests.py b/backend/src/goalflow/api/routes/context_manifests.py
+new file mode 100644
+index 00000000..2c47c26f
+--- /dev/null
++++ b/backend/src/goalflow/api/routes/context_manifests.py
+@@ -0,0 +1,150 @@
++"""上下文清单只读查询入口（#213，RFC 0012 第 7 节）。
++
++清单回答「本次模型调用实际注入了什么、来自哪里、为何被截断或排除」。**只读**：两条
++GET，不带幂等键，也不改任何状态。
++
++三条边界：
++
++1. **owner 由服务端会话绑定**，不接受请求参数传入。跨用户与不存在的记录统一返回 404，
++   响应无法区分二者——否则调用方能从响应差异里推断某个清单 ID 是否存在。
++2. **只含引用与预算，不含正文**。记忆正文与检索正文都不在响应里；条目只有实体 ID、
++   revision、来源层、预算、截断原因与冲突状态。
++3. **不暴露 `scope`**：该列当前恒等于 owner，暴露等于重复暴露归属信息。
++
++查询维度是 owner + job_id + step；排序固定 `created_at ASC, id ASC`，重复查询结果一致。
++"""
++
++from datetime import datetime
++from typing import Annotated, Any, Final
++
++from fastapi import APIRouter, Path, Query
++from pydantic import BaseModel, Field
++
++from goalflow.api.dependencies import CurrentUserDep, DatabaseDep
++from goalflow.contracts.http import ErrorResponse
++from goalflow.memory import service
++
++router = APIRouter(prefix="/api/context-manifests", tags=["context-manifests"])
++
++_ERROR_DESCRIPTIONS: Final = {
++    401: "未登录或会话失效",
++    403: "请求来源不受信任",
++    404: "上下文清单不存在，或不属于当前用户",
++    422: "请求参数校验未通过",
++}
++
++_MAX_PAGE_SIZE: Final = 100
++_DEFAULT_PAGE_SIZE: Final = 20
++
++
++def _errors(*codes: int) -> dict[int | str, dict[str, Any]]:
++    return {code: {"model": ErrorResponse, "description": _ERROR_DESCRIPTIONS[code]} for code in codes}
++
++
++ManifestIdPath = Annotated[str, Path(max_length=36, description="上下文清单 ID")]
++
++
++class ContextManifestEntryResponse(BaseModel):
++    """清单里的一条注入记录。只含引用与预算，不含正文。"""
++
++    layer: str = Field(description="来源层，例如 L3_confirmed_memory")
++    entry_type: str = Field(description="条目类型，例如 memory / evidence / context")
++    entity_id: str = Field(description="来源实体 ID；据此可回溯到具体条目")
++    revision: int | None = Field(default=None, description="来源实体的版本；来源没有版本时为空")
++    allocated_budget: int = Field(ge=0, description="该条目所属层分配的预算（字符）")
++    used_budget: int = Field(ge=0, description="该条目实际占用的预算（字符）")
++    truncated_reason: str | None = Field(
++        default=None,
++        description="未完整注入的原因，例如 layer_budget / conflict；完整注入时为空",
++    )
++    conflict: str = Field(
++        default="none",
++        description="与业务事实的冲突状态；非 none 时该条目不注入正文",
++    )
++
++
++class ContextManifestResponse(BaseModel):
++    """一次模型调用实际注入的上下文清单。"""
++
++    id: str
++    job_id: str | None = Field(default=None, description="绑定的作业 ID；没有绑定时为空")
++    step: str = Field(description="装配发生的步骤，例如 task_assistance")
++    actor: str = Field(description="记录者，例如 job")
++    strategy_revision: str = Field(description="装配策略版本；用它对账当时的注入行为")
++    retrieval_mode: str = Field(description="本次装配实际使用的检索通道")
++    created_at: datetime
++    entries: list[ContextManifestEntryResponse] = Field(
++        default_factory=list,
++        description="实际注入的条目。装配了但没有注入任何条目时为空数组",
++    )
++
++
++class ContextManifestListResponse(BaseModel):
++    items: list[ContextManifestResponse]
++    total: int = Field(ge=0, description="满足筛选条件的清单总数")
++
++
++def _entry_response(entry: service.ContextManifestEntryView) -> ContextManifestEntryResponse:
++    return ContextManifestEntryResponse(
++        layer=entry.layer,
++        entry_type=entry.entry_type,
++        entity_id=entry.entity_id,
++        revision=entry.revision,
++        allocated_budget=entry.allocated_budget,
++        used_budget=entry.used_budget,
++        truncated_reason=entry.truncated_reason,
++        conflict=entry.conflict,
++    )
++
++
++def _manifest_response(view: service.ContextManifestView) -> ContextManifestResponse:
++    return ContextManifestResponse(
++        id=view.id,
++        job_id=view.job_id,
++        step=view.step,
++        actor=view.actor,
++        strategy_revision=view.strategy_revision,
++        retrieval_mode=view.retrieval_mode,
++        created_at=view.created_at,
++        entries=[_entry_response(entry) for entry in view.entries],
++    )
++
++
++@router.get(
++    "",
++    summary="列出上下文清单",
++    description=(
++        "列出当前用户的上下文清单。owner 取自服务端会话，不接受请求参数传入；"
++        "可用 job_id 与 step 过滤。结果按创建时间稳定排序，重复查询结果一致。"
++    ),
++    responses=_errors(401, 422),
++)
++def list_context_manifests(
++    user: CurrentUserDep,
++    db: DatabaseDep,
++    job_id: Annotated[str | None, Query(max_length=36, description="按绑定的作业 ID 过滤")] = None,
++    step: Annotated[str | None, Query(max_length=64, description="按装配步骤过滤")] = None,
++    limit: Annotated[int, Query(ge=1, le=_MAX_PAGE_SIZE)] = _DEFAULT_PAGE_SIZE,
++) -> ContextManifestListResponse:
++    view = service.list_context_manifests(db, user, job_id=job_id, step=step, limit=limit)
++    return ContextManifestListResponse(
++        items=[_manifest_response(item) for item in view.items],
++        total=view.total,
++    )
++
++
++@router.get(
++    "/{manifest_id}",
++    summary="读取上下文清单",
++    description=(
++        "读取一次装配的上下文清单：实际注入的条目、来源引用、预算、截断原因与策略版本。"
++        "跨用户与不存在的 ID 统一返回 404。"
++    ),
++    responses=_errors(401, 404),
++)
++def get_context_manifest(
++    manifest_id: ManifestIdPath,
++    user: CurrentUserDep,
++    db: DatabaseDep,
++) -> ContextManifestResponse:
++    return _manifest_response(service.get_context_manifest(db, user, manifest_id))
+diff --git a/backend/src/goalflow/memory/service.py b/backend/src/goalflow/memory/service.py
+index b0bcd9c9..60196515 100644
+--- a/backend/src/goalflow/memory/service.py
++++ b/backend/src/goalflow/memory/service.py
+@@ -11,6 +11,7 @@ from __future__ import annotations
+
+ import hashlib
+ import hmac
++import json
+ import re
+ import uuid
+ from collections.abc import Callable
+@@ -28,8 +29,8 @@ from goalflow.core.config import get_settings
+ from goalflow.db.session import Database
+ from goalflow.idempotency import IdempotentRequest, ResultRef, run_idempotent
+ from goalflow.memory.enums import MemorySourceType, SuppressionReason
+-from goalflow.memory.interfaces import MemorySourceSnapshot, MemorySourceView
+-from goalflow.memory.models import Memory, MemoryRevision, MemorySource, MemorySuppression
++from goalflow.memory.interfaces import CONFLICT_NONE, MemorySourceSnapshot, MemorySourceView
++from goalflow.memory.models import ContextManifest, Memory, MemoryRevision, MemorySource, MemorySuppression
+
+ _BODY_SPACE = re.compile(r"\s+")
+ _HMAC_CONTEXT = b"goalflow-memory-v1"
+@@ -783,3 +784,148 @@ def invalidate_source(
+                 _replace_fts(session, memory, body=None)
+                 changed += 1
+         return changed
++
++
++# ---------- 上下文清单只读查询（#213） ----------
++
++
++@dataclass(frozen=True, slots=True)
++class ContextManifestEntryView:
++    """清单里的一条注入记录：只含引用与预算，不含正文。
++
++    字段与 `goalflow.memory.interfaces.ContextManifestEntry` 一致——那是写入侧形状，
++    这里是同一份记录的只读视图。
++    """
++
++    layer: str
++    entry_type: str
++    entity_id: str
++    revision: int | None
++    allocated_budget: int
++    used_budget: int
++    truncated_reason: str | None
++    conflict: str
++
++
++@dataclass(frozen=True, slots=True)
++class ContextManifestView:
++    """一次模型调用实际注入的上下文清单（RFC 0012 第 7 节）。
++
++    **不含正文**：条目只记实体引用、revision、来源层、分配与实际预算、截断原因与
++    冲突状态。`scope` 不在这里对外：它当前恒等于 owner，暴露等于重复暴露归属信息。
++    """
++
++    id: str
++    job_id: str | None
++    step: str
++    actor: str
++    strategy_revision: str
++    retrieval_mode: str
++    created_at: datetime
++    entries: list[ContextManifestEntryView]
++
++
++@dataclass(frozen=True, slots=True)
++class ContextManifestListView:
++    items: list[ContextManifestView]
++    total: int
++
++
++def _manifest_entries(raw: str) -> list[ContextManifestEntryView]:
++    """把存储的 JSON 条目读成视图。
++
++    `entries` 由 `goalflow.memory.context.manifest_draft` 写入，形状固定。这里的兜底
++    只针对历史数据损坏：读不动的条目跳过，不让整个查询失败——清单是可观测性数据，
++    不该因为一条脏记录就把整次诊断打断。
++    """
++    try:
++        parsed = json.loads(raw)
++    except (TypeError, ValueError):
++        return []
++    if not isinstance(parsed, list):
++        return []
++    entries: list[ContextManifestEntryView] = []
++    for item in parsed:
++        if not isinstance(item, dict):
++            continue
++        revision = item.get("revision")
++        truncated_reason = item.get("truncated_reason")
++        entries.append(
++            ContextManifestEntryView(
++                layer=str(item.get("layer", "")),
++                entry_type=str(item.get("entry_type", "")),
++                entity_id=str(item.get("entity_id", "")),
++                revision=int(revision) if isinstance(revision, int) else None,
++                allocated_budget=int(item.get("allocated_budget", 0)),
++                used_budget=int(item.get("used_budget", 0)),
++                truncated_reason=truncated_reason if isinstance(truncated_reason, str) else None,
++                conflict=str(item.get("conflict", CONFLICT_NONE)),
++            )
++        )
++    return entries
++
++
++def _manifest_view(row: ContextManifest) -> ContextManifestView:
++    return ContextManifestView(
++        id=row.id,
++        job_id=row.job_id,
++        step=row.step,
++        actor=row.actor,
++        strategy_revision=row.strategy_revision,
++        retrieval_mode=row.retrieval_mode,
++        created_at=row.created_at,
++        entries=_manifest_entries(row.entries),
++    )
++
++
++def list_context_manifests(
++    database: Database,
++    user: CurrentUser,
++    *,
++    job_id: str | None,
++    step: str | None,
++    limit: int,
++) -> ContextManifestListView:
++    """列出当前用户的上下文清单（#213）。
++
++    owner 只来自服务端会话，不接受调用方传入——它是服务端绑定的事实，不是筛选条件。
++    查询维度是 owner + job_id + step；排序固定 `created_at ASC, id ASC`，同一份数据
++    重复查询结果一致。
++    """
++    with database.read() as session:
++        conditions = [ContextManifest.owner_id == user.user_id]
++        if job_id is not None:
++            conditions.append(ContextManifest.job_id == job_id)
++        if step is not None:
++            conditions.append(ContextManifest.step == step)
++        total = session.scalar(select(func.count()).select_from(ContextManifest).where(*conditions)) or 0
++        rows = list(
++            session.scalars(
++                select(ContextManifest)
++                .where(*conditions)
++                .order_by(ContextManifest.created_at.asc(), ContextManifest.id.asc())
++                .limit(limit)
++            )
++        )
++        return ContextManifestListView(
++            items=[_manifest_view(row) for row in rows],
++            total=int(total),
++        )
++
++
++def get_context_manifest(database: Database, user: CurrentUser, manifest_id: str) -> ContextManifestView:
++    """读取一条上下文清单。
++
++    跨用户与不存在统一返回 NOT_FOUND，响应无法区分二者——否则调用方能从响应差异里
++    推断某个清单 ID 是否存在（与记忆详情同一约定）。
++    """
++    with database.read() as session:
++        row = session.scalar(
++            select(ContextManifest).where(
++                ContextManifest.id == manifest_id,
++                ContextManifest.owner_id == user.user_id,
++            )
++        )
++        if row is None:
++            raise GoalflowError(ErrorCode.NOT_FOUND, "上下文清单不存在")
++        return _manifest_view(row)
+diff --git a/backend/tests/memory/test_context_manifest_query.py b/backend/tests/memory/test_context_manifest_query.py
+new file mode 100644
+index 00000000..2a0fac7c
+--- /dev/null
++++ b/backend/tests/memory/test_context_manifest_query.py
+@@ -0,0 +1,528 @@
++"""上下文清单只读查询入口的目标测试（Issue #213）。
++
++这些用例是**先于实现**写的：它们钉住 HTTP 契约的形状与行为，实现尚未存在时它们必须失败，
++且失败原因必须精确落在「查询入口尚未实现」上——不能是导入错误、依赖缺失、数据库起不来或
++装置出错。
++
++为此有两条硬约束：
++
++1. **只 import 现存的符号。** 待实现的响应模型、服务函数一律不 import，改用原始 JSON 断言。
++   否则失败会变成 pytest 收集期的 ImportError，掩盖真正的问题。
++2. **只走真实 HTTP 入口。** 全部用例经 TestClient 打真实路由：路由匹配、依赖注入、
++   会话 Cookie、全局异常处理器都参与。直接调用待实现的函数会让「入口是否存在」这个问题
++   从根上消失——而这正是 #213 的核心。
++
++播种用的 manifest 走**生产同一条链路**：`goalflow.memory.context` 的 L3 适配器 →
++`assemble_context` → `manifest_draft` → `persist_manifest`。因此行里的内容与真实作业写入的
++一致，不需要在测试里手抄一份 manifest JSON 格式。
++
++参考：`backend/tests/memory/conftest.py` 提供 app / client / authed_client 装置；
++`backend/tests/memory/test_memory_contract.py` 是同目录的契约测试范式。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++
++from fastapi import FastAPI
++from fastapi.testclient import TestClient
++from sqlalchemy import text
++
++from goalflow.agent.assembly.context import ContextLayer, ContextRecipe, assemble_context
++from goalflow.agent.memory_context import manifest_strategy_revision
++from goalflow.agent.node_blueprints import TASK_ASSISTANCE
++from goalflow.contracts.enums import MemoryStatus, MemoryType
++from goalflow.db.session import Database, get_database
++from goalflow.memory.context import (
++    L3_STRATEGY_REVISION,
++    L4_STRATEGY_REVISION,
++    MemoryCollection,
++    l3_layer_snapshots,
++    manifest_draft,
++    persist_manifest,
++)
++from goalflow.memory.enums import RetrievalMode
++from goalflow.memory.interfaces import CONFLICT_NONE, MemorySnapshot
++
++# 查询入口的路径与形状。实现方照此落地即可让本文件转绿。
++LIST_PATH = "/api/context-manifests"
++DETAIL_PATH = "/api/context-manifests/{manifest_id}"
++
++# 响应体里允许出现的键。出现别的键 = 契约漂移（尤其是正文类字段）。
++ITEM_KEYS = {
++    "id",
++    "job_id",
++    "step",
++    "actor",
++    "strategy_revision",
++    "retrieval_mode",
++    "created_at",
++    "entries",
++}
++ENTRY_KEYS = {
++    "layer",
++    "entry_type",
++    "entity_id",
++    "revision",
++    "allocated_budget",
++    "used_budget",
++    "truncated_reason",
++    "conflict",
++}
++
++# 正文泄漏探针：它出现在记忆正文里，但绝不该出现在 manifest 的任何响应中。
++BODY_MARKER = "上下文清单正文泄漏探针-MARKER-213"
++
++# 出厂配方给 L3 的字符预算（ContextRecipe.default()）。
++L3_BUDGET = ContextRecipe.default().max_chars(ContextLayer.L3_CONFIRMED_MEMORY) or 0
++
++
++def _app_database(app: FastAPI) -> Database:
++    """取出路由实际使用的库。
++
++    app 夹具把 get_database 覆盖成自己的库文件，与 database 夹具那份**不是同一个**。
++    播种必须落到路由能读到的那一份，否则查询会「查不到自己刚写的数据」。
++    """
++    override = app.dependency_overrides.get(get_database)
++    assert override is not None, "app 夹具未覆盖 get_database，装置不对"
++    return override()
++
++
++def _owner_id(client: TestClient) -> str:
++    """当前登录用户的 owner_id。经会话接口取，顺带验证认证链路真的通。"""
++    response = client.get("/api/auth/session")
++    assert response.status_code == 200, response.text
++    return str(response.json()["user"]["id"])
++
++
++def _insert_other_user(database: Database) -> str:
++    """另一个 owner 的账号行。跨账号隔离用例需要一条真实存在的他人记录。"""
++    other_id = str(uuid.uuid4())
++    now = datetime.now(UTC).isoformat(timespec="microseconds")
++    with database.engine.begin() as connection:
++        connection.execute(
++            text(
++                "INSERT INTO users (id, account_identifier, role, status, timezone, revision, created_at, updated_at)"
++                " VALUES (:id, :account, 'user', 'active', 'UTC', 0, :now, :now)"
++            ),
++            {
++                "id": other_id,
++                "account": f"other-{uuid.uuid4()}@local.dev",
++                "now": now,
++            },
++        )
++    return other_id
++
++
++def _insert_job(database: Database, owner_id: str) -> str:
++    """一条真实作业行。
++
++    context_manifests.job_id 对 jobs.id 有外键，查询又按 job_id 过滤，
++    所以过滤器用例必须有一行真作业，而不是一个悬空 ID。
++    """
++    job_id = str(uuid.uuid4())
++    now = datetime.now(UTC).isoformat(timespec="microseconds")
++    with database.engine.begin() as connection:
++        connection.execute(
++            text(
++                "INSERT INTO jobs (id, owner_id, kind, dedupe_key, input_refs_json, status, attempts, revision,"
++                " created_at, updated_at)"
++                " VALUES (:id, :owner, 'task_assistance', :dedupe, :refs, 'succeeded', 0, 0, :now, :now)"
++            ),
++            {
++                "id": job_id,
++                "owner": owner_id,
++                "dedupe": f"gf213-{uuid.uuid4()}",
++                "refs": "{}",
++                "now": now,
++            },
++        )
++    return job_id
++
++
++def _memory_snapshot(memory_id: str, owner_id: str, body: str, *, revision: int = 2) -> MemorySnapshot:
++    """一条已确认、无冲突的长期记忆快照。"""
++    return MemorySnapshot(
++        memory_id=memory_id,
++        owner_id=owner_id,
++        revision=revision,
++        type=MemoryType.STABLE_FACT,
++        status=MemoryStatus.CONFIRMED,
++        body=body,
++        conflict=CONFLICT_NONE,
++    )
++
++
++def _seed_manifest(
++    database: Database,
++    owner_id: str,
++    *,
++    job_id: str | None,
++    step: str,
++    snapshots: tuple[MemorySnapshot, ...],
++    strategy_revision: str = L3_STRATEGY_REVISION,
++) -> str:
++    """按生产链路播种一条 manifest，返回它的 id。
++
++    `persist_manifest` 吞掉写入异常（只记一条脱敏日志），所以播种后必须读回确认；
++    否则一次播种失败会伪装成「查询查不到」，把装置问题误报成契约问题。
++
++    返回值用「新增行的 id」而不是「按 step 查第一条」：同一个 step 可能播多条
++    （排序用例就是），按 step 取第一条会拿到别人的行。
++    """
++    before = _manifest_ids(database, owner_id)
++    collection = MemoryCollection(snapshots=snapshots, retrieval_mode=RetrievalMode.FTS_ONLY)
++    prepared = assemble_context(ContextRecipe.default(), l3_layer_snapshots(collection))
++    draft = manifest_draft(
++        step=step,
++        scope=owner_id,
++        prepared=prepared,
++        collection=collection,
++        allocated_budget=L3_BUDGET,
++        strategy_revision=strategy_revision,
++    )
++    persist_manifest(database, draft, job_id=job_id)
++
++    created = _manifest_ids(database, owner_id) - before
++    assert len(created) == 1, f"播种失败：新增了 {len(created)} 行，期望 1 行"
++    return created.pop()
++
++
++def _manifest_ids(database: Database, owner_id: str) -> set[str]:
++    """某个 owner 名下当前已有的 manifest id。"""
++    with database.read() as session:
++        rows = session.execute(
++            text("SELECT id FROM context_manifests WHERE owner_id = :owner"),
++            {"owner": owner_id},
++        ).mappings()
++    return {str(row["id"]) for row in rows}
++
++
++def _set_created_at(database: Database, manifest_id: str, moment: datetime) -> None:
++    """把 manifest 的创建时间改成指定值。
++
++    生产写入总是取当前时刻，两次写入几乎必然落在不同微秒上；但排序用例要断言的是
++    「按创建时间排」而不是「按插入顺序排」，必须把时间钉死才有确定性。
++    """
++    with database.write() as session:
++        session.execute(
++            text("UPDATE context_manifests SET created_at = :at WHERE id = :id"),
++            {"at": moment.isoformat(timespec="microseconds"), "id": manifest_id},
++        )
++
++
++def _assert_project_error(response, *, code: str = "NOT_FOUND") -> None:
++    """断言是项目约定的资源错误，而不是「路由没注册」的默认 404。
++
++    端点未注册时 FastAPI 抛 StarletteHTTPException，全局处理器也会把它渲染成
++    `{"code": "NOT_FOUND", ...}`（见 api/errors.py::_handle_http_exception）——
++    **状态码和错误码都一样**，唯一差别是 message 恰好是 FastAPI 默认的 "Not Found"。
++    所以只断言状态码会把「没实现」判成「实现了且行为正确」；这里额外盯住 message，
++    让「端点不存在」与「记录不存在」在断言上可区分。
++    """
++    body = response.json()
++    assert body.get("code") == code, f"错误体不符合项目约定：{body}"
++    assert "request_id" in body, f"错误体缺少 request_id：{body}"
++    assert "detail" not in body, f"返回的是 FastAPI 默认错误体而不是项目错误体：{body}"
++    assert body.get("message") != "Not Found", (
++        "返回的是未注册路由的默认 404，而不是端点自己的资源错误——查询入口尚未实现"
++    )
++
++
++def test_list_context_manifests_returns_the_owner_manifest(app: FastAPI, authed_client: TestClient) -> None:
++    """列表入口能查到自己 owner 名下的 manifest，并带回元数据与条目。"""
++    database = _app_database(app)
++    owner_id = _owner_id(authed_client)
++    job_id = _insert_job(database, owner_id)
++    manifest_id = _seed_manifest(
++        database,
++        owner_id,
++        job_id=job_id,
++        step="task_assistance",
++        snapshots=(_memory_snapshot("mem-1", owner_id, BODY_MARKER),),
++    )
++
++    response = authed_client.get(LIST_PATH)
++
++    assert response.status_code == 200, response.text
++    payload = response.json()
++    assert set(payload) == {"items", "total"}, payload
++    assert payload["total"] == 1, payload
++    item = payload["items"][0]
++    assert set(item) == ITEM_KEYS, item
++    assert item["id"] == manifest_id
++    assert item["job_id"] == job_id
++    assert item["step"] == "task_assistance"
++    assert item["actor"] == "job"
++    assert item["strategy_revision"] == L3_STRATEGY_REVISION
++    assert item["retrieval_mode"] == RetrievalMode.FTS_ONLY.value
++    assert item["created_at"]
++
++
++def test_context_manifest_entries_expose_budget_truncation_and_reference_without_bodies(
++    app: FastAPI, authed_client: TestClient
++) -> None:
++    """条目带层级、来源引用、revision、预算与截断原因，且不携带任何正文。"""
++    database = _app_database(app)
++    owner_id = _owner_id(authed_client)
++    job_id = _insert_job(database, owner_id)
++    _seed_manifest(
++        database,
++        owner_id,
++        job_id=job_id,
++        step="task_assistance",
++        snapshots=(_memory_snapshot("mem-1", owner_id, BODY_MARKER, revision=7),),
++    )
++
++    response = authed_client.get(LIST_PATH)
++
++    assert response.status_code == 200, response.text
++    entries = response.json()["items"][0]["entries"]
++    assert len(entries) == 1, entries
++    entry = entries[0]
++    assert set(entry) == ENTRY_KEYS, entry
++    assert entry["layer"] == ContextLayer.L3_CONFIRMED_MEMORY.value
++    assert entry["entry_type"] == "memory"
++    assert entry["entity_id"] == "mem-1"
++    assert entry["revision"] == 7
++    assert entry["allocated_budget"] == L3_BUDGET
++    assert entry["used_budget"] > 0
++    assert entry["truncated_reason"] is None
++    assert entry["conflict"] == CONFLICT_NONE
++    assert BODY_MARKER not in response.text, "响应里出现了记忆正文"
++
++
++def test_over_budget_layer_records_the_truncated_entry(app: FastAPI, authed_client: TestClient) -> None:
++    """L3 超预算时，被截断的条目也要出现在清单里，并带截断原因。"""
++    database = _app_database(app)
++    owner_id = _owner_id(authed_client)
++    job_id = _insert_job(database, owner_id)
++    # 第一条装满 L3 预算，第二条只剩尾部额度：被截断。
++    _seed_manifest(
++        database,
++        owner_id,
++        job_id=job_id,
++        step="task_assistance",
++        snapshots=(
++            _memory_snapshot("mem-full", owner_id, "甲" * 1500),
++            _memory_snapshot("mem-cut", owner_id, "乙" * 1500),
++        ),
++    )
++
++    response = authed_client.get(LIST_PATH)
++
++    assert response.status_code == 200, response.text
++    entries = response.json()["items"][0]["entries"]
++    assert len(entries) == 2, entries
++    injected, truncated = entries
++    assert injected["entity_id"] == "mem-full"
++    assert injected["truncated_reason"] is None
++    assert truncated["entity_id"] == "mem-cut"
++    assert truncated["truncated_reason"] == "layer_budget"
++    assert truncated["used_budget"] < L3_BUDGET
++
++
++def test_get_context_manifest_returns_the_manifest_with_an_empty_entry_list(
++    app: FastAPI, authed_client: TestClient
++) -> None:
++    """存在但条目为空的 manifest 返回 200 与空列表，不当成缺失记录。
++
++    注意这是**防御性**契约：生产的 `persist_step_manifest` 在没有任何内容时会直接
++    return，不写空行（见 agent/memory_context.py）。所以这一行由本用例经
++    `persist_manifest` 显式播种，代表「库里存在但条目为空」这一状态——读路径必须
++    把它当成有效记录返回，而不是当成查无此物。
++    """
++    database = _app_database(app)
++    owner_id = _owner_id(authed_client)
++    job_id = _insert_job(database, owner_id)
++    manifest_id = _seed_manifest(
++        database,
++        owner_id,
++        job_id=job_id,
++        step="task_assistance",
++        snapshots=(),
++    )
++
++    response = authed_client.get(DETAIL_PATH.format(manifest_id=manifest_id))
++
++    assert response.status_code == 200, response.text
++    payload = response.json()
++    assert set(payload) == ITEM_KEYS, payload
++    assert payload["id"] == manifest_id
++    assert payload["entries"] == [], payload
++
++
++def test_list_context_manifests_returns_an_empty_list_when_nothing_is_recorded(
++    app: FastAPI, authed_client: TestClient
++) -> None:
++    """名下没有任何 manifest 时，列表返回 200 与空列表，而不是 404。"""
++    response = authed_client.get(LIST_PATH)
++
++    assert response.status_code == 200, response.text
++    payload = response.json()
++    assert set(payload) == {"items", "total"}, payload
++    assert payload["items"] == [], payload
++    assert payload["total"] == 0, payload
++
++
++def test_get_context_manifest_hides_another_owners_manifest(app: FastAPI, authed_client: TestClient) -> None:
++    """跨 owner 访问按「不存在」处理：详情 404，列表也不出现别人的记录。"""
++    database = _app_database(app)
++    owner_id = _owner_id(authed_client)
++    other_id = _insert_other_user(database)
++    other_job_id = _insert_job(database, other_id)
++    other_manifest_id = _seed_manifest(
++        database,
++        other_id,
++        job_id=other_job_id,
++        step="task_assistance",
++        snapshots=(_memory_snapshot("mem-other", other_id, "别人的记忆"),),
++    )
++    own_job_id = _insert_job(database, owner_id)
++    own_manifest_id = _seed_manifest(
++        database,
++        owner_id,
++        job_id=own_job_id,
++        step="task_assistance",
++        snapshots=(_memory_snapshot("mem-own", owner_id, "自己的记忆"),),
++    )
++
++    # 正对照：自己的 manifest 必须查得到——先证明端点确实存在，
++    # 后面的 404 才是「跨 owner 被拒绝」而不是「路由没注册」。
++    own = authed_client.get(DETAIL_PATH.format(manifest_id=own_manifest_id))
++    assert own.status_code == 200, own.text
++
++    detail = authed_client.get(DETAIL_PATH.format(manifest_id=other_manifest_id))
++    assert detail.status_code == 404, detail.text
++    _assert_project_error(detail)
++
++    listing = authed_client.get(LIST_PATH)
++    assert listing.status_code == 200, listing.text
++    assert other_manifest_id not in [item["id"] for item in listing.json()["items"]]
++
++
++def test_get_context_manifest_returns_404_for_a_missing_record(app: FastAPI, authed_client: TestClient) -> None:
++    """不存在的记录返回项目约定的资源错误。"""
++    database = _app_database(app)
++    owner_id = _owner_id(authed_client)
++    job_id = _insert_job(database, owner_id)
++    manifest_id = _seed_manifest(
++        database,
++        owner_id,
++        job_id=job_id,
++        step="task_assistance",
++        snapshots=(_memory_snapshot("mem-1", owner_id, "甲"),),
++    )
++
++    # 正对照：端点存在时，已有记录必须查得到。
++    existing = authed_client.get(DETAIL_PATH.format(manifest_id=manifest_id))
++    assert existing.status_code == 200, existing.text
++
++    response = authed_client.get(DETAIL_PATH.format(manifest_id=str(uuid.uuid4())))
++
++    assert response.status_code == 404, response.text
++    _assert_project_error(response)
++
++
++def test_list_context_manifests_filters_by_job_id_and_step(app: FastAPI, authed_client: TestClient) -> None:
++    """查询维度：owner 由服务端绑定，job_id 与 step 是可组合的过滤条件。"""
++    database = _app_database(app)
++    owner_id = _owner_id(authed_client)
++    job_id = _insert_job(database, owner_id)
++    other_job_id = _insert_job(database, owner_id)
++    wanted = _seed_manifest(
++        database,
++        owner_id,
++        job_id=job_id,
++        step="task_assistance",
++        snapshots=(_memory_snapshot("mem-1", owner_id, "甲"),),
++    )
++    _seed_manifest(
++        database,
++        owner_id,
++        job_id=other_job_id,
++        step="goal_clarification",
++        snapshots=(_memory_snapshot("mem-2", owner_id, "乙"),),
++    )
++
++    by_job = authed_client.get(LIST_PATH, params={"job_id": job_id})
++    assert by_job.status_code == 200, by_job.text
++    assert [item["id"] for item in by_job.json()["items"]] == [wanted]
++
++    by_step = authed_client.get(LIST_PATH, params={"step": "goal_clarification"})
++    assert by_step.status_code == 200, by_step.text
++    assert wanted not in [item["id"] for item in by_step.json()["items"]]
++
++    combined = authed_client.get(LIST_PATH, params={"job_id": job_id, "step": "goal_clarification"})
++    assert combined.status_code == 200, combined.text
++    assert combined.json()["items"] == []
++
++
++def test_list_context_manifests_is_stable_across_repeated_calls(app: FastAPI, authed_client: TestClient) -> None:
++    """返回顺序按创建时间稳定，重复查询结果逐字一致。"""
++    database = _app_database(app)
++    owner_id = _owner_id(authed_client)
++    job_id = _insert_job(database, owner_id)
++    later = _seed_manifest(
++        database,
++        owner_id,
++        job_id=job_id,
++        step="task_assistance",
++        snapshots=(_memory_snapshot("mem-later", owner_id, "后"),),
++    )
++    earlier = _seed_manifest(
++        database,
++        owner_id,
++        job_id=job_id,
++        step="task_assistance",
++        snapshots=(_memory_snapshot("mem-earlier", owner_id, "前"),),
++    )
++    # 故意让「先写的」created_at 更晚：顺序必须看创建时间，不能看插入顺序。
++    _set_created_at(database, later, datetime(2026, 10, 28, 12, 0, 1, tzinfo=UTC))
++    _set_created_at(database, earlier, datetime(2026, 10, 28, 12, 0, 0, tzinfo=UTC))
++
++    first = authed_client.get(LIST_PATH)
++    second = authed_client.get(LIST_PATH)
++
++    assert first.status_code == 200, first.text
++    assert second.status_code == 200, second.text
++    assert [item["id"] for item in first.json()["items"]] == [earlier, later]
++    assert first.json() == second.json()
++
++
++def test_context_manifest_reports_the_strategy_revision_used_at_assembly_time(
++    app: FastAPI, authed_client: TestClient
++) -> None:
++    """清单里的策略版本就是装配当时用的那个版本。
++
++    带检索证据的步骤用的是 L3+L4 组合版本（agent/memory_context.py::manifest_strategy_revision），
++    这里用生产函数取期望值，避免把版本串写死在测试里。
++    """
++    database = _app_database(app)
++    owner_id = _owner_id(authed_client)
++    job_id = _insert_job(database, owner_id)
++    expected = manifest_strategy_revision(TASK_ASSISTANCE)
++    assert expected == f"{L3_STRATEGY_REVISION}+{L4_STRATEGY_REVISION}"
++    _seed_manifest(
++        database,
++        owner_id,
++        job_id=job_id,
++        step=TASK_ASSISTANCE,
++        snapshots=(_memory_snapshot("mem-1", owner_id, "甲"),),
++        strategy_revision=expected,
++    )
++
++    response = authed_client.get(LIST_PATH)
++
++    assert response.status_code == 200, response.text
++    assert response.json()["items"][0]["strategy_revision"] == expected
++
++
++def test_context_manifest_endpoints_require_authentication(client: TestClient) -> None:
++    """未登录访问返回 401，不泄露清单是否存在。"""
++    listing = client.get(LIST_PATH)
++    assert listing.status_code == 401, listing.text
++
++    detail = client.get(DETAIL_PATH.format(manifest_id=str(uuid.uuid4())))
++    assert detail.status_code == 401, detail.text
+diff --git a/frontend/src/shared/api/generated/schema.d.ts b/frontend/src/shared/api/generated/schema.d.ts
+index b4d490e7..55593a16 100644
+--- a/frontend/src/shared/api/generated/schema.d.ts
++++ b/frontend/src/shared/api/generated/schema.d.ts
+@@ -385,6 +385,46 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/context-manifests": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * 列出上下文清单
++         * @description 列出当前用户的上下文清单。owner 取自服务端会话，不接受请求参数传入；可用 job_id 与 step 过滤。结果按创建时间稳定排序，重复查询结果一致。
++         */
++        get: operations["list_context_manifests_api_context_manifests_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
++    "/api/context-manifests/{manifest_id}": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * 读取上下文清单
++         * @description 读取一次装配的上下文清单：实际注入的条目、来源引用、预算、截断原因与策略版本。跨用户与不存在的 ID 统一返回 404。
++         */
++        get: operations["get_context_manifest_api_context_manifests__manifest_id__get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/conversations/{conversation_id}/messages": {
+         parameters: {
+             query?: never;
+@@ -2096,6 +2136,106 @@ export interface components {
+              */
+             expected_revision: number;
+         };
++        /**
++         * ContextManifestEntryResponse
++         * @description 清单里的一条注入记录。只含引用与预算，不含正文。
++         */
++        ContextManifestEntryResponse: {
++            /**
++             * Allocated Budget
++             * @description 该条目所属层分配的预算（字符）
++             */
++            allocated_budget: number;
++            /**
++             * Conflict
++             * @description 与业务事实的冲突状态；非 none 时该条目不注入正文
++             * @default none
++             */
++            conflict: string;
++            /**
++             * Entity Id
++             * @description 来源实体 ID；据此可回溯到具体条目
++             */
++            entity_id: string;
++            /**
++             * Entry Type
++             * @description 条目类型，例如 memory / evidence / context
++             */
++            entry_type: string;
++            /**
++             * Layer
++             * @description 来源层，例如 L3_confirmed_memory
++             */
++            layer: string;
++            /**
++             * Revision
++             * @description 来源实体的版本；来源没有版本时为空
++             */
++            revision?: number | null;
++            /**
++             * Truncated Reason
++             * @description 未完整注入的原因，例如 layer_budget / conflict；完整注入时为空
++             */
++            truncated_reason?: string | null;
++            /**
++             * Used Budget
++             * @description 该条目实际占用的预算（字符）
++             */
++            used_budget: number;
++        };
++        /** ContextManifestListResponse */
++        ContextManifestListResponse: {
++            /** Items */
++            items: components["schemas"]["ContextManifestResponse"][];
++            /**
++             * Total
++             * @description 满足筛选条件的清单总数
++             */
++            total: number;
++        };
++        /**
++         * ContextManifestResponse
++         * @description 一次模型调用实际注入的上下文清单。
++         */
++        ContextManifestResponse: {
++            /**
++             * Actor
++             * @description 记录者，例如 job
++             */
++            actor: string;
++            /**
++             * Created At
++             * Format: date-time
++             */
++            created_at: string;
++            /**
++             * Entries
++             * @description 实际注入的条目。装配了但没有注入任何条目时为空数组
++             */
++            entries?: components["schemas"]["ContextManifestEntryResponse"][];
++            /** Id */
++            id: string;
++            /**
++             * Job Id
++             * @description 绑定的作业 ID；没有绑定时为空
++             */
++            job_id?: string | null;
++            /**
++             * Retrieval Mode
++             * @description 本次装配实际使用的检索通道
++             */
++            retrieval_mode: string;
++            /**
++             * Step
++             * @description 装配发生的步骤，例如 task_assistance
++             */
++            step: string;
++            /**
++             * Strategy Revision
++             * @description 装配策略版本；用它对账当时的注入行为
++             */
++            strategy_revision: string;
++        };
+         /** ConversationResponse */
+         ConversationResponse: {
+             /**
+@@ -5595,6 +5735,100 @@ export interface operations {
+             };
+         };
+     };
++    list_context_manifests_api_context_manifests_get: {
++        parameters: {
++            query?: {
++                /** @description 按绑定的作业 ID 过滤 */
++                job_id?: string | null;
++                /** @description 按装配步骤过滤 */
++                step?: string | null;
++                limit?: number;
++            };
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ContextManifestListResponse"];
++                };
++            };
++            /** @description 未登录或会话失效 */
++            401: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ErrorResponse"];
++                };
++            };
++            /** @description 请求参数校验未通过 */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ErrorResponse"];
++                };
++            };
++        };
++    };
++    get_context_manifest_api_context_manifests__manifest_id__get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                /** @description 上下文清单 ID */
++                manifest_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ContextManifestResponse"];
++                };
++            };
++            /** @description 未登录或会话失效 */
++            401: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ErrorResponse"];
++                };
++            };
++            /** @description 上下文清单不存在，或不属于当前用户 */
++            404: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ErrorResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     list_messages_api_conversations__conversation_id__messages_get: {
+         parameters: {
+             query?: {
+diff --git a/openapi/goalflow.yaml b/openapi/goalflow.yaml
+index d1c283c7..ba6398db 100644
+--- a/openapi/goalflow.yaml
++++ b/openapi/goalflow.yaml
+@@ -947,6 +947,120 @@ components:
+       - expected_revision
+       title: ConstrainTaskRequest
+       type: object
++    ContextManifestEntryResponse:
++      description: 清单里的一条注入记录。只含引用与预算，不含正文。
++      properties:
++        allocated_budget:
++          description: 该条目所属层分配的预算（字符）
++          minimum: 0.0
++          title: Allocated Budget
++          type: integer
++        conflict:
++          default: none
++          description: 与业务事实的冲突状态；非 none 时该条目不注入正文
++          title: Conflict
++          type: string
++        entity_id:
++          description: 来源实体 ID；据此可回溯到具体条目
++          title: Entity Id
++          type: string
++        entry_type:
++          description: 条目类型，例如 memory / evidence / context
++          title: Entry Type
++          type: string
++        layer:
++          description: 来源层，例如 L3_confirmed_memory
++          title: Layer
++          type: string
++        revision:
++          anyOf:
++          - type: integer
++          - type: 'null'
++          description: 来源实体的版本；来源没有版本时为空
++          title: Revision
++        truncated_reason:
++          anyOf:
++          - type: string
++          - type: 'null'
++          description: 未完整注入的原因，例如 layer_budget / conflict；完整注入时为空
++          title: Truncated Reason
++        used_budget:
++          description: 该条目实际占用的预算（字符）
++          minimum: 0.0
++          title: Used Budget
++          type: integer
++      required:
++      - layer
++      - entry_type
++      - entity_id
++      - allocated_budget
++      - used_budget
++      title: ContextManifestEntryResponse
++      type: object
++    ContextManifestListResponse:
++      properties:
++        items:
++          items:
++            $ref: '#/components/schemas/ContextManifestResponse'
++          title: Items
++          type: array
++        total:
++          description: 满足筛选条件的清单总数
++          minimum: 0.0
++          title: Total
++          type: integer
++      required:
++      - items
++      - total
++      title: ContextManifestListResponse
++      type: object
++    ContextManifestResponse:
++      description: 一次模型调用实际注入的上下文清单。
++      properties:
++        actor:
++          description: 记录者，例如 job
++          title: Actor
++          type: string
++        created_at:
++          format: date-time
++          title: Created At
++          type: string
++        entries:
++          description: 实际注入的条目。装配了但没有注入任何条目时为空数组
++          items:
++            $ref: '#/components/schemas/ContextManifestEntryResponse'
++          title: Entries
++          type: array
++        id:
++          title: Id
++          type: string
++        job_id:
++          anyOf:
++          - type: string
++          - type: 'null'
++          description: 绑定的作业 ID；没有绑定时为空
++          title: Job Id
++        retrieval_mode:
++          description: 本次装配实际使用的检索通道
++          title: Retrieval Mode
++          type: string
++        step:
++          description: 装配发生的步骤，例如 task_assistance
++          title: Step
++          type: string
++        strategy_revision:
++          description: 装配策略版本；用它对账当时的注入行为
++          title: Strategy Revision
++          type: string
++      required:
++      - id
++      - step
++      - actor
++      - strategy_revision
++      - retrieval_mode
++      - created_at
++      title: ContextManifestResponse
++      type: object
+     ConversationResponse:
+       properties:
+         created_at:
+@@ -5337,6 +5451,106 @@ paths:
+       summary: 更正执行记录
+       tags:
+       - checkins
++  /api/context-manifests:
++    get:
++      description: 列出当前用户的上下文清单。owner 取自服务端会话，不接受请求参数传入；可用 job_id 与 step 过滤。结果按创建时间稳定排序，重复查询结果一致。
++      operationId: list_context_manifests_api_context_manifests_get
++      parameters:
++      - description: 按绑定的作业 ID 过滤
++        in: query
++        name: job_id
++        required: false
++        schema:
++          anyOf:
++          - maxLength: 36
++            type: string
++          - type: 'null'
++          description: 按绑定的作业 ID 过滤
++          title: Job Id
++      - description: 按装配步骤过滤
++        in: query
++        name: step
++        required: false
++        schema:
++          anyOf:
++          - maxLength: 64
++            type: string
++          - type: 'null'
++          description: 按装配步骤过滤
++          title: Step
++      - in: query
++        name: limit
++        required: false
++        schema:
++          default: 20
++          maximum: 100
++          minimum: 1
++          title: Limit
++          type: integer
++      responses:
++        '200':
++          content:
++            application/json:
++              schema:
++                $ref: '#/components/schemas/ContextManifestListResponse'
++          description: Successful Response
++        '401':
++          content:
++            application/json:
++              schema:
++                $ref: '#/components/schemas/ErrorResponse'
++          description: 未登录或会话失效
++        '422':
++          content:
++            application/json:
++              schema:
++                $ref: '#/components/schemas/ErrorResponse'
++          description: 请求参数校验未通过
++      summary: 列出上下文清单
++      tags:
++      - context-manifests
++  /api/context-manifests/{manifest_id}:
++    get:
++      description: 读取一次装配的上下文清单：实际注入的条目、来源引用、预算、截断原因与策略版本。跨用户与不存在的 ID 统一返回 404。
++      operationId: get_context_manifest_api_context_manifests__manifest_id__get
++      parameters:
++      - description: 上下文清单 ID
++        in: path
++        name: manifest_id
++        required: true
++        schema:
++          description: 上下文清单 ID
++          maxLength: 36
++          title: Manifest Id
++          type: string
++      responses:
++        '200':
++          content:
++            application/json:
++              schema:
++                $ref: '#/components/schemas/ContextManifestResponse'
++          description: Successful Response
++        '401':
++          content:
++            application/json:
++              schema:
++                $ref: '#/components/schemas/ErrorResponse'
++          description: 未登录或会话失效
++        '404':
++          content:
++            application/json:
++              schema:
++                $ref: '#/components/schemas/ErrorResponse'
++          description: 上下文清单不存在，或不属于当前用户
++        '422':
++          content:
++            application/json:
++              schema:
++                $ref: '#/components/schemas/HTTPValidationError'
++          description: Validation Error
++      summary: 读取上下文清单
++      tags:
++      - context-manifests
+   /api/conversations/{conversation_id}/messages:
+     get:
+       description: 刷新页面后按对话内 sequence 补读消息；目标澄清会话与当前任务辅助会话共用本入口，消息只属于当前用户。

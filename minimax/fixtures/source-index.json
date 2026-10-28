@@ -1,0 +1,19 @@
+{
+  "sources": [
+    {
+      "source_id": "issue-213",
+      "kind": "spec",
+      "path": "fixtures/issue-213.md"
+    },
+    {
+      "source_id": "GoalFlow/backend/src/goalflow/api/routes/context_manifests.py",
+      "kind": "code",
+      "path": "GoalFlow branch c81dee0"
+    },
+    {
+      "source_id": "GoalFlow/backend/tests/memory/test_context_manifest_query.py",
+      "kind": "test",
+      "path": "GoalFlow branch 4166918"
+    }
+  ]
+}
