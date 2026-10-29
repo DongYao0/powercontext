@@ -853,6 +853,49 @@ jobs:
       - name: Verify DSH guidance adapter requests and results
         run: uv run pytest tests/test_integration_guidance_evaluation.py::test_dsh_controlled_native_handoff_uses_only_mcp_tools_and_preserves_complete_carriers
 
+  cindy-package:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').cindy) }}
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up the Python environment
+        uses: ./.github/actions/setup-python-env
+
+      - name: Set up project tools
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+
+      - name: Cache shared JavaScript build tooling
+        uses: ./.github/actions/cache-pnpm
+        with:
+          working-directory: integrations/dsh/plugins/powercontext
+          cache-dependency-glob: integrations/dsh/plugins/powercontext/pnpm-lock.yaml
+
+      - name: Build and test the standalone Cindy archive
+        run: make cindy-test
+
+      - name: Check out pinned Cindy provider and gateway source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: makecindy/cindy
+          ref: 6e12261af3121a1fc8f56a23481f3b99bb32787c # v0.1.115
+          path: .cindy-source
+          persist-credentials: false
+          sparse-checkout: |
+            apps/desktop/src/main/cindy-brain
+            apps/desktop/src/main/mcp-integrations
+            apps/desktop/src/shared
+
+      - name: Verify provider and gateway source against a real local Server
+        env:
+          POWERCONTEXT_CINDY_SOURCE: ${{ github.workspace }}/.cindy-source
+        run: uv run pytest tests/e2e/test_cindy_mcp_chain.py tests/e2e/test_cindy_hooks_chain.py -q
+
   pi-package:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').pi) }}

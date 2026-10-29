@@ -1835,11 +1835,13 @@ function isRedirect(status) {
 }
 var PowerContextClient = class {
 	baseUrl;
+	userAgent;
 	authorization;
 	requestTimeoutMs;
 	fetchImpl;
 	constructor(options) {
 		this.baseUrl = normalizeServerUrl(options.baseUrl, options.allowInsecureHttp);
+		this.userAgent = options.userAgent ?? PLUGIN_USER_AGENT;
 		this.authorization = options.authorization;
 		this.requestTimeoutMs = options.requestTimeoutMs;
 		this.fetchImpl = options.fetch ?? fetch;
@@ -1888,7 +1890,7 @@ var PowerContextClient = class {
 		const headers = {
 			"X-PowerContext-Dream-Contract": "2",
 			Accept: "application/json",
-			"User-Agent": PLUGIN_USER_AGENT,
+			"User-Agent": this.userAgent,
 			...request$2.headers
 		};
 		if (this.authorization) headers.Authorization = this.authorization;

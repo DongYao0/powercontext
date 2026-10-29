@@ -38,6 +38,12 @@ database = [
 dify = ["integrations/dify/**", "tests/*dify*"]
 hermes = ["integrations/hermes/**", "tests/*hermes*"]
 dsh = ["integrations/dsh/**", "tests/*dsh*", "scripts/generate_js_operations.py", "scripts/sync_dsh_plugin_tree.py"]
+cindy = [
+  "integrations/cindy/**", "tests/e2e/*cindy*", "scripts/generate_js_operations.py",
+  "integrations/dsh/plugins/powercontext/src/**", "integrations/dsh/plugins/powercontext/package.json",
+  "integrations/dsh/plugins/powercontext/pnpm-lock.yaml", "integrations/dsh/plugins/powercontext/pnpm-workspace.yaml",
+  "integrations/dsh/plugins/powercontext/tsconfig.json",
+]
 pi = ["integrations/pi/**", "tests/*pi_*"]
 opencode = ["integrations/opencode/**", "tests/*opencode*"]
 openclaw = ["integrations/openclaw/**", "tests/*openclaw*"]
