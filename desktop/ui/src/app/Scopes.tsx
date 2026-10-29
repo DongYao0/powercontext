@@ -17,7 +17,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { DesktopState, ScopeDescriptor } from "../generated/ipc";
 import { desktopApi } from "../shared/ipc";
-import { connectionMessages } from "./connection-messages";
+import {
+  connectionMessages,
+  operationRestriction,
+} from "./connection-messages";
+import { operationSupported } from "./context";
 import { messages, type Language } from "./messages";
 import { PageFeedback, ErrorFeedback } from "./PageFeedback";
 export function Scopes({
@@ -47,6 +51,8 @@ export function Scopes({
     <button onClick={onManageConnections}>{common.chooseConnection}</button>
   );
   const active = state?.active;
+  const listSupported = operationSupported(active?.report, "list_scopes");
+  const selectionSupported = operationSupported(active?.report, "get_scope");
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<ScopeDescriptor[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -74,7 +80,7 @@ export function Scopes({
     setBusy(false);
   }, [active?.generation]);
   async function load(next: string | null) {
-    if (!active) return;
+    if (!active || !listSupported) return;
     setOperation("list");
     const generation = active.generation;
     const ticket = ++sequence.current;
@@ -112,7 +118,7 @@ export function Scopes({
     }
   }
   async function select(id: string) {
-    if (!active) return;
+    if (!active || !selectionSupported) return;
     const ticket = lifetime.current;
     const generation = active.generation;
     if (
@@ -160,20 +166,36 @@ export function Scopes({
               <code>{active.scope.scope_id}</code>
             </p>
           )}
-          {!active.report.compatibilityVerified && (
+          {!listSupported && (
             <PageFeedback
               compact
               kind="unavailable"
-              title={t.noCompatibility}
+              title={t.scopeListUnavailable}
               action={manage}
-            />
+            >
+              <p>
+                {operationRestriction(active.report, "list_scopes", language)}
+              </p>
+            </PageFeedback>
+          )}
+          {!selectionSupported && (
+            <PageFeedback
+              compact
+              kind="unavailable"
+              title={t.scopeSelectUnavailable}
+              action={manage}
+            >
+              <p>
+                {operationRestriction(active.report, "get_scope", language)}
+              </p>
+            </PageFeedback>
           )}
           {error != null && (
             <ErrorFeedback
               error={error}
               language={language}
               action={
-                operation === "list" ? (
+                operation === "list" && listSupported ? (
                   <button disabled={busy} onClick={() => void load(null)}>
                     {common.restartScopeSearch}
                   </button>
@@ -192,23 +214,16 @@ export function Scopes({
               }
             />
           )}
-          {!busy &&
-            error == null &&
-            items === null &&
-            active.report.compatibilityVerified && (
-              <PageFeedback compact kind="empty" title={common.scopeIdle}>
-                <p>{common.scopeIdleHint}</p>
-              </PageFeedback>
-            )}
-          <fieldset
-            disabled={
-              !active.report.compatibilityVerified ||
-              (busy && operation === "select")
-            }
-          >
+          {!busy && error == null && items === null && listSupported && (
+            <PageFeedback compact kind="empty" title={common.scopeIdle}>
+              <p>{common.scopeIdleHint}</p>
+            </PageFeedback>
+          )}
+          <fieldset disabled={busy && operation === "select"}>
             <label>
               {t.scopeQuery}
               <input
+                disabled={!listSupported}
                 value={query}
                 maxLength={256}
                 onChange={(e) => {
@@ -228,7 +243,10 @@ export function Scopes({
               />
             </label>
             <div className="actions">
-              <button disabled={busy} onClick={() => void load(null)}>
+              <button
+                disabled={busy || !listSupported}
+                onClick={() => void load(null)}
+              >
                 {t.find}
               </button>
             </div>
@@ -237,7 +255,7 @@ export function Scopes({
                 {items.map((scope) => (
                   <li key={scope.scope_id}>
                     <button
-                      disabled={busy}
+                      disabled={busy || !selectionSupported}
                       onClick={() => void select(scope.scope_id)}
                     >
                       {scope.title}
@@ -251,7 +269,10 @@ export function Scopes({
               <PageFeedback compact kind="empty" title={t.empty} />
             )}
             {cursor && (
-              <button disabled={busy} onClick={() => void load(cursor)}>
+              <button
+                disabled={busy || !listSupported}
+                onClick={() => void load(cursor)}
+              >
                 {t.more}
               </button>
             )}

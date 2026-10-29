@@ -10,9 +10,12 @@ current-user service controller used by `powercontext service`; it does not need
 Its own Python and dependencies must be distributed separately from the Server runtime it manages. A missing Server
 interpreter therefore does not prevent the tool itself from starting or inspecting the registered service.
 
-This boundary supports prepared Server runtimes. Downloading and repairing the managed runtime, the Desktop native
-bridge, and the installation UI are separate capabilities. Existing human-facing CLI commands remain available.
+This service boundary supports prepared Server runtimes. For fixed managed resources and the install/repair policy,
+see [Managed local Server installation](managed-local-server.md). The Desktop native bridge and installation UI are
+separate capabilities. Existing human-facing CLI commands remain available.
 Ops is not an HTTP API and does not add a daemon.
+Managed registrations carrying `isolated_runtime=true` require the bundled Ops or a matching-version service tool;
+an older CLI that does not support this definition field rejects it instead of managing the registration.
 
 ## Operator binding and invocation
 

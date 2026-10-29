@@ -43,9 +43,11 @@ SELECTIONS = ("full", "automatic", "seekdb-code")
 def selected_indexes(cases: list[dict[str, Any]], selection: str, *, release: bool) -> list[int]:
     gate.require(selection in SELECTIONS, "Unknown upgrade selection")
     gate.require(not release or selection != "seekdb-code", "Manual-only acceptance cannot authorize publication")
-    manual = {index for index, case in enumerate(cases) if gate.manual_upgrade_case(case)}
     selected = [
-        index for index in range(len(cases)) if selection == "full" or (index in manual) == (selection == "seekdb-code")
+        index
+        for index, case in enumerate(cases)
+        if selection in {"full", "automatic"}
+        or (case["backend"] == "seekdb" and case["configuration"] in {"full-server-code", "full-server-vector-code"})
     ]
     gate.require(selected, "No cases match the upgrade selection")
     return selected
@@ -265,13 +267,7 @@ def main() -> None:
         else:
             accepted = collect(gate.ROOT, args.prepared.resolve(), args.reports.resolve(), args.output.resolve())
             if accepted:
-                verdict = json.loads((args.output / "result.json").read_text(encoding="utf-8"))
-                scope = (
-                    "Complete upgrade matrix"
-                    if verdict["complete"]
-                    else "Required automatic cases (manual cases waived)"
-                )
-                print(f"{scope} passed; {len(accepted)} validated distributions")
+                print(f"Complete upgrade matrix passed; {len(accepted)} validated distributions")
             else:
                 print("Selected upgrade cases passed; full acceptance remains incomplete; no publication artifacts")
     except (

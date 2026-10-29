@@ -344,6 +344,14 @@ class AccessAuditStore(Protocol):
     ) -> tuple[AccessAuditEvent, ...]: ...
 
 
+class IdempotentAccessAuditStore(AccessAuditStore, Protocol):
+    """Optional recovery capability: one immutable event per stable event_id."""
+
+    async def append_audit_once(self, event: AccessAuditEvent, /) -> AccessAuditEvent:
+        """Return an identical replay, rejecting a reused ID with different fields."""
+        ...
+
+
 class AccessRepository(RelationshipReader, RelationshipWriter, AccessAuditStore, Protocol):
     """Read requirements used by the built-in Provider."""
 

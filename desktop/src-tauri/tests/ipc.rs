@@ -226,3 +226,52 @@ fn memory_commands_reject_untrusted_callers_before_accessing_the_connection() {
         }
     }
 }
+
+#[test]
+fn session_commands_work_without_a_connection_and_reject_untrusted_callers() {
+    use powercontext_desktop::{commands, session_observations::SessionObservations};
+    use tauri::Manager;
+    let app = mock_builder()
+        .manage(SessionObservations::default())
+        .invoke_handler(tauri::generate_handler![
+            commands::session_summary,
+            commands::reset_session_observations,
+            commands::preview_session_diagnostics
+        ])
+        .build(test_context())
+        .unwrap();
+    for command in [
+        "session_summary",
+        "reset_session_observations",
+        "preview_session_diagnostics",
+    ] {
+        for (label, origin, allowed) in [
+            ("main", LOCAL_ORIGIN, true),
+            ("other", LOCAL_ORIGIN, false),
+            ("main", "https://evil.example", false),
+        ] {
+            let window = app.get_webview_window(label).unwrap_or_else(|| {
+                tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+                    .build()
+                    .unwrap()
+            });
+            let result = get_ipc_response(
+                &window,
+                InvokeRequest {
+                    cmd: command.into(),
+                    callback: CallbackFn(0),
+                    error: CallbackFn(1),
+                    url: origin.parse().unwrap(),
+                    body: InvokeBody::default(),
+                    headers: Default::default(),
+                    invoke_key: INVOKE_KEY.into(),
+                },
+            );
+            assert_eq!(
+                result.is_ok(),
+                allowed,
+                "{command} {label} {origin}: {result:?}"
+            );
+        }
+    }
+}

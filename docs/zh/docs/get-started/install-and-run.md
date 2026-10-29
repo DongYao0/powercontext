@@ -176,14 +176,14 @@ powercontext server run
 
 ## 使用 OceanBase
 
-连接已有 OceanBase **MySQL 兼容模式的用户租户**。PowerContext 在该租户内创建数据库，
-不负责创建 OceanBase 实例、租户或账户。确认网络可达，按上文步骤安装 Server，然后配置连接：
+连接已有 OceanBase **MySQL 兼容模式的用户租户**。完整 Server 需要先准备所选数据库，并通过显式维护初始化
+Server 表结构，再启动服务。PowerContext 不负责创建 OceanBase 实例、租户或账户。
+确认网络可达，按上文步骤安装 Server，然后配置连接：
 
 ```bash
 export POWERCONTEXT_SERVER_DATABASE_KIND=oceanbase
 # 凭据应保存在密钥管理服务或受保护的环境文件中。
 export POWERCONTEXT_SERVER_DATABASE_URL='mysql+aoceanbase://user%40tenant:encoded-password@host:2881/?charset=utf8mb4'
-powercontext server run
 ```
 
 使用租户账户和实际的直连或 OBProxy 地址、端口。URL 用户名和密码中的保留字符需要百分号编码，例如
@@ -196,19 +196,22 @@ powercontext server run
 包含反引号的名称会在配置校验阶段被拒绝，不会连接或创建数据库。请使用 `powercontext`、`team_context`
 或不含反引号的中文名称。
 
-启动先尝试连接目标库，已有可用库不要求额外建库权限。只有明确的“数据库不存在”错误才触发实例或租户级连接，
+Python SDK 初始化时先尝试连接目标库，已有可用库不要求额外建库权限。只有明确的“数据库不存在”错误才触发实例或租户级连接，
 执行 `CREATE DATABASE IF NOT EXISTS`，随后重新连接目标库并初始化应用表。认证、网络错误不会触发建库或切库。
 如果服务器拒绝访问但无法确认库是否存在，错误会要求管理员同时检查数据库和权限。
 
-目标库缺失而应用账户没有建库权限时，请管理员在**同一租户**中执行以下 SQL；自定义部署应替换为实际库名，
-然后为应用账户授予所需数据库权限：
+首次部署完整 Server 时，需要先创建所选数据库。SDK 自动初始化因权限不足无法建库时，也可由管理员执行同一步骤。
+请在**同一租户**中执行以下 SQL；自定义部署应替换为实际库名，然后为应用账户授予所需数据库权限：
 
 ```sql
 CREATE DATABASE IF NOT EXISTS `powercontext` CHARACTER SET utf8mb4;
 ```
 
-准备完成后使用原 URL 重启。创建缺失表仍然需要建表权限；已有完整可用库不会新增建库权限要求。
-启动不会删除或重建已有数据库，不会在失败后切换其他数据库，也不授权升级已有表结构。
+完整 Server 接下来应按[数据库迁移](../operate/database-migrations.md)指南，显式指定证据目录和协调模式，
+对登记的 Server bundle 执行 plan、apply 和 verify。数据库就绪后再运行 `powercontext server run`。
+Server 启动检查就绪状态，不初始化 OceanBase 表结构，也不会自动升级已有库。SDK 调用方完成建库后可以使用原 URL 重试初始化。
+创建缺失表仍然需要建表权限；已有完整可用库不会新增建库权限要求。
+初始化不会删除或重建已有数据库，不会在失败后切换其他数据库，也不授权升级已有表结构。
 并发创建使用幂等建库、建表 DDL，并处理索引重名竞争；这不提供已有表结构迁移的协调能力，也不改变嵌入式 seekDB
 对实例进程所有权的限制。
 

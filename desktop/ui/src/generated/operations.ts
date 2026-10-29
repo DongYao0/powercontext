@@ -25,6 +25,10 @@ export const operations = {
     "method": "GET",
     "path": "/health/ready"
   },
+  "get_server_info": {
+    "method": "GET",
+    "path": "/v1/server-info"
+  },
   "get_capabilities": {
     "method": "GET",
     "path": "/v1/capabilities"

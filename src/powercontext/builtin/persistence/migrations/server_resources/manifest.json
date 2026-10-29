@@ -20,6 +20,10 @@
     "s1402": [
       "schemas/sqlite-s1402.json",
       "schemas/mysql-s1402.json"
+    ],
+    "v1_4_1_004": [
+      "schemas/sqlite-v1_4_1_004.json",
+      "schemas/mysql-v1_4_1_004.json"
     ]
   },
   "sqlite_baselines": {
@@ -37,6 +41,9 @@
     ],
     "s1402": [
       "795b6fd01188c15d16625c59506aadc42134dc8293ffdd4a1588a04f8f66e877"
+    ],
+    "v1_4_1_004": [
+      "84d736b5e722a56ebe8a32318732543d43548a63a43709dbf0c571e7e4af83b5"
     ]
   },
   "affected_objects": [
@@ -130,7 +137,8 @@
     "pc_retained_dream_candidate_heads",
     "pc_retained_dream_candidate_versions",
     "pc_memory_artifact_archive",
-    "pc_portable_restore_receipts"
+    "pc_portable_restore_receipts",
+    "pc_access_owner_recovery"
   ],
   "readiness_scope": "server",
   "retained_objects": [
@@ -183,6 +191,10 @@
     "s1402": [
       "server_upgrade",
       "portable_storage"
+    ],
+    "v1_4_1_004": [
+      "server_upgrade",
+      "portable_storage"
     ]
   },
   "retained_fingerprints": {
@@ -197,7 +209,8 @@
     "schemas/mysql-s1300.json",
     "schemas/mysql-s1400.json",
     "schemas/mysql-s1401.json",
-    "schemas/mysql-s1402.json"
+    "schemas/mysql-s1402.json",
+    "schemas/mysql-v1_4_1_004.json"
   ],
   "mysql_history": "mysql",
   "mysql_schema_extensions": {

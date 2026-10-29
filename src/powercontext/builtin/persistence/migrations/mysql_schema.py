@@ -331,6 +331,10 @@ class MySQLSchema:
         self.affected_objects = tuple(dict.fromkeys([*self.affected_objects, *tables, declaration_name]))
 
     def _matches(self, inventory: dict[str, Any], expected: dict[str, Any]) -> bool:
+        # Most DDL recovery prefixes have different table sets. Reject them
+        # before copying the complete inventory to normalize backend defaults.
+        if inventory.keys() != expected.keys() or inventory["tables"].keys() != expected["tables"].keys():
+            return False
         # Captured backends may expose an explicit default that another backend
         # omits. Only registered values may be absent; retain it in fingerprints.
         actual = copy.deepcopy(inventory)

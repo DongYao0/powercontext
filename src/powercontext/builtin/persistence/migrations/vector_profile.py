@@ -80,6 +80,11 @@ class ServerVectorProfile:
             layouts["s1402"] = layouts["s1401"] + [
                 ["table", "pc_portable_restore_receipts", "pc_portable_restore_receipts", receipt]
             ]
+        if "v1_4_1_004" in manifest["revision_resources"]:
+            owner = json.loads((directory / "schemas/sqlite-v1_4_1_004.json").read_text(encoding="utf-8"))["create"]
+            layouts["v1_4_1_004"] = layouts["s1402"] + [
+                ["table", "pc_access_owner_recovery", "pc_access_owner_recovery", owner]
+            ]
         for entries in layouts.values():
             entries.sort(key=lambda row: (row[0], row[1]))
         return layouts

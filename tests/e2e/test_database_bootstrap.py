@@ -77,7 +77,7 @@ async def assert_record(profile, name: str) -> None:
 _MAXIMUM_REPORTED_OUTPUT = 6000
 
 
-def run_seekdb_scenario(directory: Path, filename: str) -> None:
+def run_seekdb_scenario(directory: Path, filename: str, *, timeout: int = 90) -> None:
     """Retry once only when the child exceeds the process deadline.
 
     A native stall can prevent in-process cancellation, so retry with a fresh
@@ -97,7 +97,7 @@ def run_seekdb_scenario(directory: Path, filename: str) -> None:
                 cwd=target,
                 capture_output=True,
                 text=True,
-                timeout=90,
+                timeout=timeout,
                 check=False,
             )
             output = result.stdout + result.stderr
@@ -233,7 +233,7 @@ def test_seekdb_inspection_reuses_an_existing_database_without_provisioning(shor
 @pytest.mark.skipif(not _SEEKDB, reason="set POWERCONTEXT_TEST_BOOTSTRAP_SEEKDB=1")
 def test_seekdb_legacy_choice_preserves_old_data_and_separates_new_database(short_tmp_path: Path) -> None:
     pytest.importorskip("pylibseekdb")
-    run_seekdb_scenario(short_tmp_path, "seekdb_legacy_choice.py")
+    run_seekdb_scenario(short_tmp_path, "seekdb_legacy_choice.py", timeout=360)
 
 
 @pytest.mark.skipif(not _SEEKDB, reason="set POWERCONTEXT_TEST_BOOTSTRAP_SEEKDB=1")

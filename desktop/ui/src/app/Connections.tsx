@@ -24,7 +24,11 @@ import type {
 } from "../generated/ipc";
 import { contractSha256 } from "../generated/operations";
 import { desktopApi } from "../shared/ipc";
-import { connectionMessages, connectionError } from "./connection-messages";
+import {
+  connectionMessages,
+  connectionError,
+  discoveryMessage,
+} from "./connection-messages";
 import { messages, type Language } from "./messages";
 import { PageFeedback, ErrorFeedback } from "./PageFeedback";
 import { useConfirmation } from "./useConfirmation";
@@ -489,6 +493,14 @@ export function Connections({
                   {report?.compatibilityVerified ? t.verified : t.unverified}
                 </dd>
               </div>
+              {report?.discovery && (
+                <div>
+                  <dt>{t.discovery}</dt>
+                  <dd aria-live="polite">
+                    {discoveryMessage(report.discovery, language)}
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt>{t.capabilities}</dt>
                 <dd>

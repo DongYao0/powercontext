@@ -730,6 +730,23 @@ impl Capabilities {
     }
 }
 
+/// ContractVersion : A major/minor compatibility version. A major increment may remove or incompatibly change the governed contract. A minor increment only adds backward-compatible behavior or fields.
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize, TS)]
+pub struct ContractVersion {
+    #[serde(rename = "major")]
+    pub major: i64,
+    #[serde(rename = "minor")]
+    pub minor: i64,
+}
+
+impl ContractVersion {
+    /// A major/minor compatibility version. A major increment may remove or incompatibly change the governed contract. A minor increment only adds backward-compatible behavior or fields.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(major: i64, minor: i64) -> ContractVersion {
+        ContractVersion { major, minor }
+    }
+}
+
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, TS, Default,
 )]
@@ -978,6 +995,26 @@ pub enum Configuration {
     Unconfigured,
     #[serde(rename = "unknown")]
     Unknown,
+}
+
+/// FeatureContract : Compatibility version for exactly the listed OpenAPI operation IDs. Adding operations or compatible semantics increments minor; removing, renaming or incompatibly changing a listed operation increments major.
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize, TS)]
+pub struct FeatureContract {
+    #[serde(rename = "version")]
+    pub version: ContractVersion,
+    #[serde(rename = "operations")]
+    pub operations: Vec<String>,
+}
+
+impl FeatureContract {
+    /// Compatibility version for exactly the listed OpenAPI operation IDs. Adding operations or compatible semantics increments minor; removing, renaming or incompatibly changing a listed operation increments major.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(version: ContractVersion, operations: Vec<String>) -> FeatureContract {
+        FeatureContract {
+            version,
+            operations,
+        }
+    }
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -1379,6 +1416,57 @@ impl SearchMemoryResponse {
     }
 }
 
+/// ServerInfo : Stable deployment identity and protocol compatibility metadata. Compatible clients must ignore unknown optional fields added by a future schema minor version. This contract intentionally excludes runtime capabilities, health, limits, inventory and authorization-principal identity.
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize, TS)]
+pub struct ServerInfo {
+    /// Compatibility version for this response shape and field semantics.
+    #[serde(rename = "schema_version")]
+    pub schema_version: ContractVersion,
+    #[serde(rename = "product")]
+    pub product: Product,
+    /// Opaque identity of the durable Server deployment. It is unrelated to Access deployment_id and remains stable across restarts, upgrades, backup restore and replicas sharing the same primary database.
+    #[serde(rename = "server_id")]
+    pub server_id: String,
+    #[serde(rename = "package_version")]
+    pub package_version: String,
+    /// Major/minor projection of the OpenAPI info.version served by this package.
+    #[serde(rename = "api_contract_version")]
+    pub api_contract_version: ContractVersion,
+    /// Stable feature groups keyed by contract name.
+    #[serde(rename = "feature_contracts")]
+    pub feature_contracts: std::collections::HashMap<String, FeatureContract>,
+}
+
+impl ServerInfo {
+    /// Stable deployment identity and protocol compatibility metadata. Compatible clients must ignore unknown optional fields added by a future schema minor version. This contract intentionally excludes runtime capabilities, health, limits, inventory and authorization-principal identity.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        schema_version: ContractVersion,
+        product: Product,
+        server_id: String,
+        package_version: String,
+        api_contract_version: ContractVersion,
+        feature_contracts: std::collections::HashMap<String, FeatureContract>,
+    ) -> ServerInfo {
+        ServerInfo {
+            schema_version,
+            product,
+            server_id,
+            package_version,
+            api_contract_version,
+            feature_contracts,
+        }
+    }
+}
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, TS, Default,
+)]
+pub enum Product {
+    #[serde(rename = "powercontext")]
+    #[default]
+    Powercontext,
+}
+
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct SourceTypeReference {
@@ -1462,6 +1550,7 @@ pub fn declarations(config: &ts_rs::Config) -> Vec<String> {
         <BuiltinProfile as ts_rs::TS>::decl(config),
         <Capabilities as ts_rs::TS>::decl(config),
         <Configuration as ts_rs::TS>::decl(config),
+        <ContractVersion as ts_rs::TS>::decl(config),
         <DreamOperation as ts_rs::TS>::decl(config),
         <Effect as ts_rs::TS>::decl(config),
         <ExtractionBackground as ts_rs::TS>::decl(config),
@@ -1469,6 +1558,7 @@ pub fn declarations(config: &ts_rs::Config) -> Vec<String> {
         <ExtractionObservation as ts_rs::TS>::decl(config),
         <ExtractionObservationStatus as ts_rs::TS>::decl(config),
         <ExtractionStatus as ts_rs::TS>::decl(config),
+        <FeatureContract as ts_rs::TS>::decl(config),
         <HealthResponse as ts_rs::TS>::decl(config),
         <Location as ts_rs::TS>::decl(config),
         <MatchedBy as ts_rs::TS>::decl(config),
@@ -1476,6 +1566,7 @@ pub fn declarations(config: &ts_rs::Config) -> Vec<String> {
         <MemorySearchMode as ts_rs::TS>::decl(config),
         <OutputKind as ts_rs::TS>::decl(config),
         <PreparedContextSchema as ts_rs::TS>::decl(config),
+        <Product as ts_rs::TS>::decl(config),
         <PromptCapability as ts_rs::TS>::decl(config),
         <PromptCapabilityStatus as ts_rs::TS>::decl(config),
         <ReadinessResponse as ts_rs::TS>::decl(config),
@@ -1489,6 +1580,7 @@ pub fn declarations(config: &ts_rs::Config) -> Vec<String> {
         <ScopeQueryField as ts_rs::TS>::decl(config),
         <SearchMemoryRequest as ts_rs::TS>::decl(config),
         <SearchMemoryResponse as ts_rs::TS>::decl(config),
+        <ServerInfo as ts_rs::TS>::decl(config),
         <ShareUnit as ts_rs::TS>::decl(config),
         <SourceTypeReference as ts_rs::TS>::decl(config),
         <Stage as ts_rs::TS>::decl(config),

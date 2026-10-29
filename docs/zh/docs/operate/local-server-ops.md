@@ -8,8 +8,9 @@ description: 使用独立 Ops 工具配置和管理已准备好的个人 Server 
 Ops 为个人 Server 提供非交互的配置和服务管理入口，复用 `powercontext service` 使用的当前用户服务控制器，调用时不需要已有的 Server HTTP 会话。
 Ops 自带的 Python 与依赖必须和受管 Server 的运行环境分开分发。因此，Server 解释器缺失不会妨碍工具自身启动和检查服务注册。
 
-此入口管理已准备好的 Server 环境。下载和修复受管环境、Desktop 原生桥接以及安装界面是另外的能力。原有的人用 CLI 命令继续可用。
+此服务入口管理已准备好的 Server 环境。固定受管资源及安装、修复策略见[受管本地 Server 安装](managed-local-server.md)。Desktop 原生桥接和安装界面是另外的能力，原有的人用 CLI 命令继续可用。
 Ops 不是 HTTP API，也不新增常驻进程。
+包含 `isolated_runtime=true` 的受管注册需使用随包 Ops 或匹配版本的服务工具；不支持该定义字段的旧 CLI 会拒绝它，不再继续管理该注册。
 
 ## 绑定目标与启动
 

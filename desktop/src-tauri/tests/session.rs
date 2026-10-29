@@ -73,7 +73,9 @@ async fn fixture() -> Fixture {
                 }
                 let text = String::from_utf8(request).unwrap();
                 let path = text.split_whitespace().nth(1).unwrap();
-                let (status, body) = if path.contains("/access/me") {
+                let (status, body) = if path.contains("/server-info") {
+                    (404, r#"{}"#)
+                } else if path.contains("/access/me") {
                     if changed.load(Ordering::Relaxed) {
                         (401, r#"{}"#)
                     } else {
@@ -223,6 +225,22 @@ async fn switching_connection_cancels_a_slow_scope_read_before_it_can_return_old
         .unwrap();
     assert_eq!(result.err().unwrap().code, SafeError::StaleContext);
     assert_eq!(manager.state().unwrap().active.unwrap().connection_id, b);
+    let summary = manager.observations().summary().unwrap();
+    for unit in [
+        powercontext_desktop::session_observations::ObservationUnit::HttpRequest,
+        powercontext_desktop::session_observations::ObservationUnit::UserOperation,
+    ] {
+        assert!(summary.recent.iter().any(|record| record.unit == unit
+            && record.operation
+                == powercontext_desktop::session_observations::ObservedOperation::ListScopes
+            && record.outcome
+                == powercontext_desktop::session_observations::ObservationOutcome::Cancelled));
+    }
+    let text = manager.observations().diagnostic_text().unwrap();
+    assert!(!text.contains(&a));
+    assert!(!text.contains(&b));
+    assert!(!text.contains(&server.endpoint));
+
     server.release.notify_one();
 }
 #[tokio::test]

@@ -19,7 +19,6 @@ import re
 import shlex
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import cast
 
 import httpx
 import pytest
@@ -62,11 +61,6 @@ from powercontext.server.settings import (
 from powercontext.sources import Source
 
 _ACCESS_FAMILIES = "atomic-memory:enabled,experience:enabled,handoff:enabled,memory:enabled,profile:enabled,prompt:enabled,skill:enabled"
-
-
-class _StartupOnlyAccessControl:
-    async def committed_receipt_identity(self, _scope_id: str, _source_id: str, /) -> None:
-        return None
 
 
 def _access_readiness_checks(
@@ -680,11 +674,11 @@ def test_enforced_mode_fails_closed_if_the_authorization_provider_disappears(tmp
             database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'runtime.db'}"),
             mcp=McpConfig(enabled=False),
         ),
-        access_control=cast(AccessControlService, _StartupOnlyAccessControl()),
     )
     headers = {"Authorization": "Bearer server-secret"}
 
     with TestClient(app) as client:
+        assert isinstance(app.state.access_control, AccessControlService)
         app.state.access_control = None
         readiness = client.get("/health/ready")
         protected = (

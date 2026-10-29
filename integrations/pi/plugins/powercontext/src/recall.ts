@@ -17,17 +17,18 @@
 import { captureUserPrompt } from './capture.ts'
 import { combineSignals, createTimeoutSignal, type PowerContextClient } from './client.ts'
 import type { ResolvedConfig } from './config.ts'
+import type { DiagnosticEvent } from './diagnostics.ts'
+import type { PendingFlushResult } from './flush.ts'
 import { validatePreparedContext } from './prepared-context.ts'
 import { scrubSecrets } from './secrets.ts'
-import type { DiagnosticEvent } from './diagnostics.ts'
 
 export interface PluginRuntime {
   client: PowerContextClient
   config: ResolvedConfig
   resolveScope: (cwd: string) => Promise<string>
   recordCapture?: (scopeId: string, position: number) => void
-  flushPending?: (signal?: AbortSignal) => Promise<void>
-  diagnostic?: (event: string, error: unknown) => void
+  flushPending?: (lifecycleEvent: string, signal?: AbortSignal) => Promise<PendingFlushResult>
+  diagnostic?: (event: string, error: unknown, extra?: Record<string, unknown>) => void
   observe?: (event: DiagnosticEvent) => void
 }
 

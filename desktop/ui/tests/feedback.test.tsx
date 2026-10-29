@@ -73,7 +73,13 @@ const report: CheckReport = {
   capabilities: fact,
   compatibilityVerified: true,
   anonymousAccess: true,
-  supportedOperations: [],
+  supportedOperations: [
+    "remember_memory",
+    "search_memory",
+    "get_artifact_revision",
+    "list_scopes",
+    "get_scope",
+  ],
 };
 const scope = {
   scope_id: "exact-scope-a",

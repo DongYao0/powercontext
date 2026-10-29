@@ -19,6 +19,10 @@
       "release1400_operations.py",
       "schemas/mysql-r1400.json",
       "source-provenance.json"
+    ],
+    "v1_4_1_004": [
+      "schemas/sqlite-v1_4_1_004.json",
+      "schemas/mysql-v1_4_1_004.json"
     ]
   },
   "sqlite_baselines": {
@@ -36,6 +40,9 @@
     ],
     "r1400": [
       "374ad3217e4dc286c3942708da52cc8262e30581e2b836bedd0c4e693f1b75bc"
+    ],
+    "v1_4_1_004": [
+      "84d736b5e722a56ebe8a32318732543d43548a63a43709dbf0c571e7e4af83b5"
     ]
   },
   "affected_objects": [
@@ -129,7 +136,8 @@
     "pc_retained_dream_candidate_heads",
     "pc_retained_dream_candidate_versions",
     "pc_memory_artifact_archive",
-    "pc_portable_restore_receipts"
+    "pc_portable_restore_receipts",
+    "pc_access_owner_recovery"
   ],
   "readiness_scope": "server",
   "retained_objects": [
@@ -187,6 +195,10 @@
     "s1402": [
       "server_upgrade",
       "portable_storage"
+    ],
+    "v1_4_1_004": [
+      "server_upgrade",
+      "portable_storage"
     ]
   },
   "retained_fingerprints": {
@@ -201,7 +213,8 @@
     "schemas/mysql-r1400.json",
     "schemas/mysql-s1400.json",
     "schemas/mysql-s1401.json",
-    "schemas/mysql-s1402.json"
+    "schemas/mysql-s1402.json",
+    "schemas/mysql-v1_4_1_004.json"
   ],
   "mysql_history": "mysql",
   "mysql_schema_extensions": {

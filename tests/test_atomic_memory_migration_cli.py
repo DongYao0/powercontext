@@ -437,6 +437,8 @@ class _ReadOnlyInspection:
 @pytest.mark.parametrize("action", ["plan", "verify"])
 @pytest.mark.parametrize("backend", ["oceanbase", "seekdb"])
 def test_inspection_never_provisions_the_configured_database(tmp_path, monkeypatch, maintenance_cli, action, backend):
+    # Exercise SDK upkeep after the separate Server ownership check.
+    monkeypatch.setattr(server_cli, "_managed_storage", lambda _database, **_kwargs: False)
     monkeypatch.setattr(server_cli, "OceanBaseProfile", _ReadOnlyInspection)
     monkeypatch.setattr(server_cli, "SeekDBProfile", _ReadOnlyInspection)
     monkeypatch.setenv("POWERCONTEXT_SERVER_DATABASE_KIND", backend)
@@ -479,10 +481,19 @@ def test_inspection_preserves_uninitialized_seekdb_target(tmp_path, monkeypatch,
     monkeypatch.setenv("POWERCONTEXT_SERVER_DATABASE_PATH", str(path))
     result = CliRunner().invoke(maintenance_cli, ["server", "atomic-memory-migrate", "--action", action])
 
-    assert result.exit_code == 2, result.output
-    assert "existing seekdb instance" in unstyle(result.output)
+    if target_state in {"file", "unrecognized"}:
+        assert result.exit_code == 1, result.output
+        assert json.loads(result.output)["error"] == "unsupported_target"
+    else:
+        assert result.exit_code == 2, result.output
+        assert "existing seekdb instance" in unstyle(result.output)
+    # Shared admission retains its coordination lock beside the target. It must
+    # not initialize native storage or change any existing target contents.
+    lock = path.with_name(path.name + ".pc-migration.lock")
     assert {
-        item.relative_to(tmp_path): item.read_bytes() if item.is_file() else None for item in tmp_path.rglob("*")
+        item.relative_to(tmp_path): item.read_bytes() if item.is_file() else None
+        for item in tmp_path.rglob("*")
+        if item != lock
     } == original
 
 

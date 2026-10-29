@@ -544,9 +544,9 @@ def test_native_read_admission_keeps_one_snapshot(tmp_path, monkeypatch, entry):
         async def open_instance(_path):
             return SimpleNamespace(connection_options=lambda: {}, close=lambda: None)
 
-        monkeypatch.setattr(connections, "_seekdb_storage_exists", lambda _path: True)
+        monkeypatch.setattr(connections.seekdb_profile, "has_native_storage", lambda _path: True)
         monkeypatch.setattr(connections.seekdb_profile, "_load_binding", lambda: SimpleNamespace(aopen=open_instance))
         monkeypatch.setattr(connections.seekdb_profile, "_create_engine", lambda *_args: adapter)
-        MaintenanceConnections(SeekDBConfig(path=path)).run(read_twice)
+        MaintenanceConnections(SeekDBConfig(path=path, database="test")).run(read_twice)
     with sqlite3.connect(target) as writer:
         assert writer.execute("SELECT value FROM snapshot_values").fetchone() == (2,)

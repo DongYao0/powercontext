@@ -192,15 +192,15 @@ not automatically migrate data, send retention reminders, compare databases, or 
 
 ## Use OceanBase
 
-Connect to an existing OceanBase **MySQL-compatible user tenant**. PowerContext creates a database inside that tenant;
-it does not provision an OceanBase instance, tenant, or account. Ensure network access and complete the Server
+Connect to an existing OceanBase **MySQL-compatible user tenant**. Prepare the selected database and initialize its
+full Server schema through explicit maintenance before starting the Server. PowerContext does not provision an
+OceanBase instance, tenant, or account. Ensure network access and complete the Server
 installation steps above, then configure the connection:
 
 ```bash
 export POWERCONTEXT_SERVER_DATABASE_KIND=oceanbase
 # Store credentials in your secret manager or a protected environment file.
 export POWERCONTEXT_SERVER_DATABASE_URL='mysql+aoceanbase://user%40tenant:encoded-password@host:2881/?charset=utf8mb4'
-powercontext server run
 ```
 
 Use the tenant account and the actual direct-connection or OBProxy endpoint and port. Percent-encode reserved characters
@@ -215,21 +215,26 @@ leading/trailing whitespace, and system database names; names are never silently
 Names containing backticks are rejected during configuration validation, before connecting or creating a database.
 Choose a name such as `powercontext`, `team_context`, or a Chinese name without backticks.
 
-Startup first connects to the selected database. If it is usable, no database-creation privileges are required. Only a
+Python SDK initialization first connects to the selected database. If it is usable, no database-creation privileges are required. Only a
 confirmed unknown-database error triggers an instance/tenant connection and `CREATE DATABASE IF NOT EXISTS`, followed
 by a new connection to the selected database and application-table initialization. Authentication and network errors
 do not trigger creation or fallback. If access is denied without proving whether the database exists, the error asks
 an administrator to check both existence and privileges.
 
-If the database is missing and the application account cannot create it, ask an administrator to run the following in
-the **same tenant**, using your configured name, then grant the application account the required database privileges:
+For a new full Server deployment, create the selected database first. If SDK initialization cannot create a missing
+database, the same administrator step applies. Run the following in the **same tenant**, using your configured name,
+then grant the application account the required database privileges:
 
 ```sql
 CREATE DATABASE IF NOT EXISTS `powercontext` CHARACTER SET utf8mb4;
 ```
 
-Restart using the same URL after provisioning. Creating missing tables requires table-creation privileges; an existing
-fully initialized database does not acquire a new database-creation privilege requirement. Startup never drops or
+For the full Server, follow [database migrations](../operate/database-migrations.md) to plan, apply, and verify the
+registered Server bundle with an explicit evidence directory and coordination mode. Start `powercontext server run`
+only after the database is ready. Server startup checks readiness and does not initialize OceanBase schemas or
+automatically migrate existing databases. SDK callers can retry initialization using the same URL after provisioning.
+Creating missing tables requires table-creation privileges; an existing fully initialized database does not acquire a
+new database-creation privilege requirement. Initialization never drops or
 recreates an existing database, never switches to another database after a failure, and does not authorize schema upgrades.
 Concurrent creation uses idempotent database/table DDL and handles duplicate-index creation races. This does not provide
 coordination for existing-schema migrations or change embedded seekDB's process-ownership restrictions.

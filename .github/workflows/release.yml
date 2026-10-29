@@ -99,7 +99,7 @@ jobs:
     uses: ./.github/workflows/upgrade-release.yml
     with:
       release: true
-      selection: automatic
+      selection: full
       source_ref: ${{ needs.resolve-release.outputs.source_sha }}
       release_tag: ${{ needs.resolve-release.outputs.tag }}
       skip_upgrade_acceptance: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_upgrade_acceptance }}
@@ -118,7 +118,7 @@ jobs:
           path: dist/
 
       - name: Publish release distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
 
   release-assets:
     runs-on: ubuntu-latest
@@ -172,7 +172,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
 
       - name: Set up website tools
-        uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
 
       - name: Cache website dependencies
         uses: ./.github/actions/cache-pnpm

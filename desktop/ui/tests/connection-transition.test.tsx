@@ -55,7 +55,13 @@ const report = {
   capabilities: fact,
   compatibilityVerified: true,
   anonymousAccess: true,
-  supportedOperations: [],
+  supportedOperations: [
+    "remember_memory",
+    "search_memory",
+    "get_artifact_revision",
+    "list_scopes",
+    "get_scope",
+  ],
 };
 const scope = {
   scope_id: "scope-a",
@@ -148,6 +154,8 @@ test.each(["使用此连接", "检查连接"])(
     await answerConfirmation(user, false);
     expect((newInput as HTMLTextAreaElement).value).toBe("new target draft");
   },
+  // This full navigation journey exceeds 5 seconds on shared Intel macOS runners.
+  15_000,
 );
 
 test("a failed connection operation refreshes native state and releases the editing pause", async () => {

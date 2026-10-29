@@ -27,11 +27,11 @@ from types import ModuleType
 from unittest.mock import patch
 
 import pymysql
-from sqlalchemy import Column, Index, Integer, MetaData, String, Table, select
+from httpx import ASGITransport, AsyncClient
 
-from powercontext.builtin.persistence.seekdb import LegacySeekDBDatabaseError, SeekDBConfig, SeekDBProfile
+from powercontext.builtin.persistence.migrations.models import MigrationError
+from powercontext.builtin.persistence.seekdb import SeekDBConfig, SeekDBProfile
 from powercontext.builtin.persistence.seekdb import profile as seekdb_profile
-from powercontext.builtin.persistence.tables import BUILTIN_TABLES
 from powercontext.server.factory import create_server_app
 from powercontext.server.settings import ServerSettings
 
@@ -96,13 +96,6 @@ async def diagnose(options: dict[str, object], current_phase: Callable[[], str])
 
 
 async def scenario(directory: Path) -> None:
-    records = Table(
-        "pc_bootstrap_records",
-        MetaData(),
-        Column("id", Integer, primary_key=True),
-        Column("value", String(64), nullable=False),
-    )
-    Index("ix_pc_bootstrap_records_value", records.c.value)
     path = directory / "seekdb"
     old = SeekDBConfig(path=path, database="test")
     options: dict[str, object] = {}
@@ -121,41 +114,55 @@ async def scenario(directory: Path) -> None:
         phase = value
         print(phase, file=sys.stderr, flush=True)
 
-    async def assert_preserved(profile: SeekDBProfile) -> None:
-        async with profile.database.transaction() as connection:
-            assert await connection.scalar(select(records.c.value).where(records.c.id == 1)) == "preserved"
-            assert (await connection.exec_driver_sql("SELECT DATABASE()")).scalar_one() == "test"
+    async def assert_preserved(app) -> None:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+            response = await client.get(f"/v1/scopes/{retained['scope_id']}")
+            assert response.status_code == 200, response.text
+            assert response.json() == retained
+            assert (await client.get("/v1/server-info")).json()["server_id"] == original_identity
 
     observer = patch.object(seekdb_profile, "_open_instance", observed_open)
     observer.start()
     watchdog = asyncio.create_task(diagnose(options, lambda: phase), name="seekdb-bootstrap-diagnostics")
     try:
-        async with asyncio.timeout(60):
+        # Two fresh Server databases execute the complete registered migration
+        # chain; the other startups verify admission and preserved readback.
+        async with asyncio.timeout(300):
             stage("seed: opening test")
-            # Model a provisioned deployment: a partial database is rejected on purpose,
-            # and creating the whole schema here keeps the fragile startup phase free of
-            # table DDL because it only observes that everything already exists.
-            async with SeekDBProfile.open(old, tables=(*BUILTIN_TABLES, records)) as profile:
+            # Use the Server's registered schema and public write path so the
+            # retained deployment remains valid through full startup admission.
+            app = create_server_app(settings=ServerSettings(database=old, workspace=directory))
+            async with (
+                app.router.lifespan_context(app),
+                AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client,
+            ):
                 stage("seed: insert")
-                async with profile.database.transaction() as connection:
-                    await connection.execute(records.insert().values(id=1, value="preserved"))
+                response = await client.post(
+                    "/v1/scopes",
+                    json={"title": "Preserved scope", "summary": "Retained legacy data", "idempotency_key": "legacy"},
+                )
+                assert response.status_code == 201, response.text
+                retained = response.json()
+                original_identity = (await client.get("/v1/server-info")).json()["server_id"]
                 stage("seed: closing")
             stage("implicit choice: opening")
             app = create_server_app(settings=ServerSettings(database=SeekDBConfig(path=path), workspace=directory))
             try:
                 async with app.router.lifespan_context(app):
                     raise AssertionError("Implicit database switch must be rejected")  # noqa: TRY003
-            except LegacySeekDBDatabaseError as error:
+            except MigrationError as error:
+                assert error.code == "explicit_database_required"
                 assert "database='test'" in str(error)
                 assert "database='powercontext'" in str(error)
             stage("old data: reopening test")
             app = create_server_app(settings=ServerSettings(database=old, workspace=directory))
             async with app.router.lifespan_context(app):
                 stage("explicit legacy choice: server started")
-            async with SeekDBProfile.open(old, tables=(records,)) as profile:
+                await assert_preserved(app)
+            async with SeekDBProfile.open_existing(old, tables=()) as profile:
                 stage("old data: read")
-                await assert_preserved(profile)
                 async with profile.database.transaction() as connection:
+                    assert (await connection.exec_driver_sql("SELECT DATABASE()")).scalar_one() == "test"
                     assert (
                         await connection.exec_driver_sql(
                             "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = %s",
@@ -167,19 +174,25 @@ async def scenario(directory: Path) -> None:
             app = create_server_app(
                 settings=ServerSettings(database=SeekDBConfig(path=path, database="powercontext"), workspace=directory)
             )
-            async with app.router.lifespan_context(app):
+            async with (
+                app.router.lifespan_context(app),
+                AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client,
+            ):
                 stage("explicit default choice: server started")
-            async with SeekDBProfile.open(
-                SeekDBConfig(path=path, database="powercontext"), tables=(records,)
+                assert (await client.get(f"/v1/scopes/{retained['scope_id']}")).status_code == 404
+                assert (await client.get("/v1/server-info")).json()["server_id"] != original_identity
+            async with SeekDBProfile.open_existing(
+                SeekDBConfig(path=path, database="powercontext"), tables=()
             ) as profile:
                 stage("explicit choice: read empty database")
                 async with profile.database.transaction() as connection:
-                    assert (await connection.execute(select(records))).all() == []
+                    assert (await connection.exec_driver_sql("SELECT DATABASE()")).scalar_one() == "powercontext"
                 stage("explicit choice: closing")
             stage("final read: reopening test")
-            async with SeekDBProfile.open(old, tables=(records,)) as profile:
+            app = create_server_app(settings=ServerSettings(database=old, workspace=directory))
+            async with app.router.lifespan_context(app):
                 stage("final read: check preserved data")
-                await assert_preserved(profile)
+                await assert_preserved(app)
                 stage("final read: closing")
             stage("complete")
     finally:

@@ -69,7 +69,7 @@ builtin = [
 ]
 seekdb = [
     "powercontext[builtin]",
-    "pylibseekdb>=1.4.0.post1,<2; sys_platform == 'linux' or sys_platform == 'darwin'",
+    "pylibseekdb>=1.4.0.post2,<2; sys_platform == 'linux' or sys_platform == 'darwin'",
 ]
 client = [
     "httpx[socks]>=0.28,<1",
@@ -210,6 +210,7 @@ exclude = [
     "evaluation/coding",
     "evaluation/artifact_evolution",
     "evaluation/memory/longmemeval_v2",
+    "evaluation/memory/capture_ownership",
     "evaluation/skills",
     "evaluation/zcode_guidance",
 ]
@@ -230,7 +231,7 @@ include = ["tests/**"]
 missing-override-decorator = "ignore"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "evaluation/memory/atomic_extraction/tests"]
 pythonpath = ["integrations/pydantic-ai/src", "scripts"]
 markers = [
     "native_service: mutates a disposable matching-platform current-user service manager",
@@ -244,6 +245,10 @@ markers = [
 target-version = "py311"
 line-length = 120
 fix = true
+
+[tool.ruff.per-file-target-version]
+# Claude Code runs these hooks with the host's python3, often the macOS system Python 3.9.
+"integrations/claude-code/plugins/powercontext/**/*.py" = "py39"
 
 [tool.ruff.lint]
 select = [
@@ -296,6 +301,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "examples/jupyter/*.ipynb" = ["S101", "RUF001", "TRY003"]
 "examples/jupyter/_tutorial.py" = ["RUF001"]
+"evaluation/**/tests/**/*.py" = ["S101"]
 "tests/**/*.py" = ["S101", "S603"]
 "tests/*.py" = ["S101", "S603"]
 

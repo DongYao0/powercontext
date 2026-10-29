@@ -20,7 +20,7 @@ import asyncio
 import logging
 from collections.abc import Sequence
 from contextlib import asynccontextmanager, nullcontext
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from time import perf_counter
 from typing import cast
@@ -237,6 +237,8 @@ class AtomicMemorySearchPage:
     #: Set only when the query embedding was abandoned for lexical retrieval, so a
     #: caller can tell "no vector channel was ever wanted" apart from "it was lost".
     embedding_fallback: str | None = None
+    #: Seconds spent waiting for the query embedding, so a context preparation can share one budget across searches.
+    embedding_wait_seconds: float = field(default=0.0, compare=False)
 
 
 class AtomicMemoryApplication:
@@ -541,6 +543,7 @@ class ScopedAtomicMemory:
             raise InvalidBaseAccessRequestError("mode", "must be auto, text, vector, or hybrid")
         if kind is not None:
             AtomicMemoryContent(kind=kind, text="validation")
+        started = asyncio.get_running_loop().time()
         mode, vector, query_embedding, embedding_calls, embedding_fallback = await self._resolve_query_embedding(
             query,
             mode,
@@ -549,6 +552,7 @@ class ScopedAtomicMemory:
             allow_embedding,
             public_search=artifact_request is not None,
         )
+        embedding_wait_seconds = asyncio.get_running_loop().time() - started
         channel_weights = application.recall_channel_weights if mode == "hybrid" else None
         profile = application.index.capabilities.embedding_profile if vector is not None else None
         # Inference finishes before the business snapshot opens. Builtin policy
@@ -641,7 +645,7 @@ class ScopedAtomicMemory:
                     )
                 )
             page = replace(page, matches=tuple(matches))
-        return replace(page, recoverable=recoverable)
+        return replace(page, recoverable=recoverable, embedding_wait_seconds=embedding_wait_seconds)
 
     async def _validate_search_hits(self, connection, hits, *, verify_vectors) -> tuple[AtomicMemory, ...]:
         """Verify only returned candidates against one bounded authority snapshot.
@@ -742,16 +746,18 @@ class ScopedAtomicMemory:
         capabilities = application.index.capabilities
         profile = capabilities.embedding_profile
         requested_mode = mode
+        reusable = reuse is not None and reuse.embedding_profile == profile
         if mode == "auto":
             mode = "hybrid" if profile is not None else "text"
-            if not allow_embedding and capabilities.fts:
+            # Disallowing embedding stops new provider requests; a matching cached vector needs none.
+            if not allow_embedding and capabilities.fts and not reusable:
                 return "text", None, None, 0, None
         if mode not in {"vector", "hybrid"}:
             return mode, None, None, 0, None
         model = application.embedding_model
         if profile is None or model is None or model.profile != profile:
             raise AtomicMemoryIndexError("embedding-profile", "Requested vector retrieval is unavailable")
-        if reuse is not None and reuse.embedding_profile == profile:
+        if reuse is not None and reusable:
             return mode, reuse.query_vector, reuse, 0, None
         try:
             async with asyncio.timeout(embedding_timeout_seconds):

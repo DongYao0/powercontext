@@ -21,6 +21,9 @@
     "allow-list-scopes",
     "allow-cancel-scope-reads",
     "allow-default-scope",
-    "allow-select-scope"
+    "allow-select-scope",
+    "allow-session-summary",
+    "allow-reset-session-observations",
+    "allow-preview-session-diagnostics"
   ]
 }

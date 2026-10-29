@@ -25,6 +25,7 @@ mod diagnostic_process;
 pub mod diagnostics;
 pub mod error;
 pub mod ipc;
+pub mod session_observations;
 pub mod transport;
 
 use tauri::Manager;
@@ -55,7 +56,10 @@ pub fn run() {
             commands::list_scopes,
             commands::cancel_scope_reads,
             commands::default_scope,
-            commands::select_scope
+            commands::select_scope,
+            commands::session_summary,
+            commands::reset_session_observations,
+            commands::preview_session_diagnostics
         ])
         .setup(|app| {
             let manager = app
@@ -76,6 +80,11 @@ pub fn run() {
                     std::io::Error::other("Desktop profile storage is already in use").into(),
                 );
             }
+            let observations = manager
+                .as_ref()
+                .map(|manager| manager.observations().clone())
+                .unwrap_or_default();
+            app.manage(observations);
             app.manage(commands::HostState { manager });
             app.manage(diagnostics::DiagnosticHost::new(
                 app.path().app_data_dir().ok(),

@@ -56,10 +56,122 @@ const state: DesktopState = {
       capabilities: emptyFact,
       compatibilityVerified: true,
       anonymousAccess: true,
-      supportedOperations: ["list_scopes"],
+      supportedOperations: ["list_scopes", "get_scope"],
     },
   },
 };
+test("unsupported Scope selection leaves lookup and pagination available", async () => {
+  const user = userEvent.setup();
+  const active = state.active!;
+  const partial: DesktopState = {
+    ...state,
+    active: {
+      ...active,
+      report: {
+        ...active.report,
+        supportedOperations: ["list_scopes"],
+        discovery: {
+          status: "supported",
+          reason: null,
+          error: null,
+          server: null,
+          operations: {
+            get_scope: {
+              status: "unsupported",
+              reason: "operation_missing",
+              qualificationId: null,
+            },
+          },
+        },
+      },
+    },
+  };
+  vi.mocked(desktopApi.scopes).mockResolvedValue({
+    items: [
+      {
+        scope_id: "scope-a",
+        title: "Listed scope",
+        summary: "",
+        context_references: [],
+        external_references: [],
+        version: 1,
+      },
+    ],
+    next_cursor: "opaque-next",
+  });
+  render(
+    <Scopes
+      state={partial}
+      language="zh"
+      onState={vi.fn()}
+      confirmSwitch={() => true}
+    />,
+  );
+  expect(screen.getByText(/Server 未声明支持此操作/)).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "查找范围" }));
+  const choice = screen.getByRole("button", {
+    name: "Listed scope",
+  }) as HTMLButtonElement;
+  expect(choice.disabled).toBe(true);
+  await user.click(choice);
+  expect(desktopApi.selectScope).not.toHaveBeenCalled();
+  const more = screen.getByRole("button", {
+    name: "下一页",
+  }) as HTMLButtonElement;
+  expect(more.disabled).toBe(false);
+  await user.click(more);
+  expect(desktopApi.scopes).toHaveBeenLastCalledWith(1, "", "opaque-next");
+});
+test("missing Scope lookup is disabled without claiming selection is unsupported", async () => {
+  const user = userEvent.setup();
+  const active = state.active!;
+  const partial: DesktopState = {
+    ...state,
+    active: {
+      ...active,
+      report: {
+        ...active.report,
+        supportedOperations: ["get_scope"],
+        discovery: {
+          status: "supported",
+          reason: null,
+          error: null,
+          server: null,
+          operations: {
+            list_scopes: {
+              status: "unsupported",
+              reason: "operation_missing",
+              qualificationId: null,
+            },
+          },
+        },
+      },
+    },
+  };
+  render(
+    <Scopes
+      state={partial}
+      language="en"
+      onState={vi.fn()}
+      confirmSwitch={() => true}
+    />,
+  );
+  expect(
+    (screen.getByLabelText("Find scopes by title") as HTMLInputElement)
+      .disabled,
+  ).toBe(true);
+  const find = screen.getByRole("button", {
+    name: "Find scopes",
+  }) as HTMLButtonElement;
+  expect(find.disabled).toBe(true);
+  expect(screen.getByText("Scope search is unavailable")).toBeTruthy();
+  expect(
+    screen.getByText(/Server does not declare support for this operation/),
+  ).toBeTruthy();
+  expect(screen.queryByText("Scope selection is unavailable")).toBeNull();
+  await user.click(find);
+  expect(desktopApi.scopes).not.toHaveBeenCalled();
+});
 test("editing a query cancels the native read and hides a late response", async () => {
   const user = userEvent.setup();
   let finish!: (page: ScopePage) => void;

@@ -78,6 +78,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Require native DSH configuration APIs without requiring the DSH CLI.",
     )
+    claude_code = parser.getgroup("powercontext-claude-code")
+    claude_code.addoption(
+        "--require-claude-code-python-floor",
+        action="store_true",
+        default=False,
+        help="Require Python 3.9 for the Claude Code plugin entry point test instead of skipping it.",
+    )
     zcode = parser.getgroup("zcode-host-acceptance")
     zcode.addoption("--run-zcode-acceptance", action="store_true", help="Run real ZCode CLI acceptance.")
     zcode.addoption(

@@ -21,6 +21,7 @@ use crate::{
     },
     error::SafeError,
     ipc::authorize_window,
+    session_observations::{SessionObservations, SessionSummary},
     transport::{
         ApiFailure,
         wire::{ScopeDescriptor, ScopePage},
@@ -28,6 +29,33 @@ use crate::{
 };
 pub struct HostState {
     pub manager: Result<ConnectionManager, SafeError>,
+}
+
+#[tauri::command]
+pub fn session_summary<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    state: tauri::State<'_, SessionObservations>,
+) -> Result<SessionSummary, SafeError> {
+    authorize_window(window.label())?;
+    state.summary()
+}
+
+#[tauri::command]
+pub fn reset_session_observations<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    state: tauri::State<'_, SessionObservations>,
+) -> Result<(), SafeError> {
+    authorize_window(window.label())?;
+    state.reset()
+}
+
+#[tauri::command]
+pub fn preview_session_diagnostics<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    state: tauri::State<'_, SessionObservations>,
+) -> Result<String, SafeError> {
+    authorize_window(window.label())?;
+    state.diagnostic_text()
 }
 fn manager<'a, R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
