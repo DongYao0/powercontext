@@ -667,7 +667,11 @@ def test_code_cli_reports_explicit_legacy_database_required(tmp_path, monkeypatc
         ("atomic-memory-rebuild-projection", "_atomic_memory_maintenance", ["--maintenance-confirmed"]),
     ],
 )
-def test_server_maintenance_reports_database_permission_guidance(monkeypatch, error_type, command, operation, options):
+def test_server_maintenance_reports_database_permission_guidance(
+    tmp_path, monkeypatch, error_type, command, operation, options
+):
+    monkeypatch.setenv("POWERCONTEXT_HOME", str(tmp_path))
+
     async def refuse_database(*_args, **_kwargs):
         raise error_type("team_context", creation_statement("team_context"))
 

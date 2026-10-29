@@ -35,8 +35,9 @@ from sqlalchemy.pool import NullPool
 from powercontext.builtin.persistence.bootstrap import (
     DatabaseAccessError,
     DatabaseCreationError,
-    database_is_available,
+    MissingDatabaseError,
     ensure_database,
+    require_existing_database,
 )
 from powercontext.builtin.persistence.database import begin_mysql_read_snapshot
 from powercontext.builtin.persistence.oceanbase import OceanBaseConfig
@@ -203,8 +204,13 @@ class MaintenanceConnections:
                         ),
                         name=config.database,
                     )
-                elif not await database_is_available(engine):
-                    return operation(None, identity, lambda: None)
+                else:
+                    try:
+                        await require_existing_database(engine, name=config.database)
+                    except MissingDatabaseError as error:
+                        raise MigrationError("database_missing", str(error)) from error
+                    except DatabaseAccessError as error:
+                        raise MigrationError("database_access_denied", str(error)) from error
                 inode = _directory_inode(path)
                 if initial_inode is not None and initial_inode != inode:
                     raise MigrationError("migration_lock_lost", "The seekdb directory changed during engine startup.")

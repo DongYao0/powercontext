@@ -331,7 +331,9 @@ identity return `target_identity_unavailable`; a proxy hostname is not used as a
 seekdb inspection does not start an engine for a missing path or empty directory. A nonempty directory without a
 recognized engine layout returns `unsupported_target`. An unconfigured database name whose old `test` database still
 holds PowerContext tables returns `explicit_database_required` instead of selecting either database implicitly; select
-the name explicitly and rerun the command. Writable seekDB maintenance that cannot create its configured database
+the name explicitly and rerun the command. For an existing engine, read-only inspection of a missing selected database
+returns `database_missing` with its name and provisioning guidance; denied access returns `database_access_denied`.
+Writable seekDB maintenance that cannot create its configured database
 returns `database_creation_required`, and a permission denial that leaves existence unproven returns
 `database_access_denied`; both keep the administrator statement and provisioning guidance in the payload. Opening a
 valid existing engine may write native logs and other engine housekeeping files; read-only migration commands do not

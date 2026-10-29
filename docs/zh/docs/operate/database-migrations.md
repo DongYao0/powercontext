@@ -271,7 +271,7 @@ powercontext server db-migrate apply --env-file deployment.env --backup manual \
 
 OceanBase 维护须能通过 `effective_tenant_id()`、`oceanbase.GV$OB_PARAMETERS`、`oceanbase.DBA_OB_TENANTS` 读取租户 ID、集群 ID 和租户创建信息。权限不足或身份信息不完整时返回 `target_identity_unavailable`，不以代理主机名代替数据库身份。
 
-seekdb 只读检查遇到缺失路径或空目录时不启动引擎；非空目录缺少可识别的引擎结构时返回 `unsupported_target`。未显式配置库名、而旧 `test` 库中仍有 PowerContext 表时返回 `explicit_database_required`，不会隐式选择任一数据库；显式选定库名后重跑该命令。可写 seekDB 维护无法创建配置指定的库时返回 `database_creation_required`，权限被拒且无法确认库是否存在时返回 `database_access_denied`；两者都在载荷中保留管理员语句与准备指引。打开有效的已有引擎可能写入原生日志和引擎维护文件；只读迁移命令不执行业务 DDL、不初始化表。
+seekdb 只读检查遇到缺失路径或空目录时不启动引擎；非空目录缺少可识别的引擎结构时返回 `unsupported_target`。未显式配置库名、而旧 `test` 库中仍有 PowerContext 表时返回 `explicit_database_required`，不会隐式选择任一数据库；显式选定库名后重跑该命令。已有引擎中缺少所选数据库时，只读检查返回带库名和准备指引的 `database_missing`；访问被拒时返回 `database_access_denied`。可写 seekDB 维护无法创建配置指定的库时返回 `database_creation_required`，权限被拒且无法确认库是否存在时返回 `database_access_denied`；两者都在载荷中保留管理员语句与准备指引。打开有效的已有引擎可能写入原生日志和引擎维护文件；只读迁移命令不执行业务 DDL、不初始化表。
 
 `--evidence-dir PATH` 指定目标库之外的持久目录，保存维护进度及恢复引用。`status`、`plan`、`apply`、`verify` 和重试必须使用同一目录；进程、容器或迁移 Job 退出后仍须保留。每个数据库使用独立目录，并限制为迁移操作者可访问。
 

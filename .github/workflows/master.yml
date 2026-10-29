@@ -445,9 +445,9 @@ jobs:
         run: make code-seekdb-test
 
       - name: Test database bootstrap with embedded seekdb without skips
-        # Legacy selection covers two full Server initializations plus reopen
-        # checks. Keep room for the bounded native-process retry.
-        timeout-minutes: 15
+        # Two 360s native-process deadlines still leave room for the remaining
+        # bootstrap cases and diagnostic upload before the step deadline.
+        timeout-minutes: 20
         env:
           POWERCONTEXT_TEST_BOOTSTRAP_SEEKDB: "1"
           POWERCONTEXT_TEST_BOOTSTRAP_DIAGNOSTICS: ${{ github.workspace }}/.powercontext/database-bootstrap-ci

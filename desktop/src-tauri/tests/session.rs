@@ -297,15 +297,18 @@ async fn historical_qualification_cannot_authorize_the_current_contract() {
     );
     let contract: serde_json::Value =
         serde_json::from_str(include_str!("../src/transport/operations.json")).unwrap();
+    let current_contract = contract["contractSha256"]
+        .as_str()
+        .expect("the bundled contract needs a SHA-256 digest");
     let state = manager.state().unwrap();
     let historical = state
         .compatibility_profiles
         .iter()
-        .find(|profile| profile.id == "sqlite-atomic-d9a78567-v1")
-        .unwrap();
+        .find(|profile| profile.contract_sha256 != current_contract)
+        .expect("the compatibility catalog needs a historical contract for this test");
     assert_ne!(
         Some(historical.contract_sha256.as_str()),
-        contract["contractSha256"].as_str()
+        Some(current_contract)
     );
     let state = manager
         .save_profile(

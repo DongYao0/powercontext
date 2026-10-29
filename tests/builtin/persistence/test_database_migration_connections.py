@@ -35,6 +35,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from powercontext.builtin.persistence import dream_schema
+from powercontext.builtin.persistence.bootstrap import MissingDatabaseError
 from powercontext.builtin.persistence.migrations import connections
 from powercontext.builtin.persistence.migrations.connections import BackendIdentity, MaintenanceConnections
 from powercontext.builtin.persistence.migrations.locking import local_migration_lock
@@ -460,6 +461,37 @@ def test_seekdb_provisioning_failure_is_a_maintenance_error(tmp_path: Path, monk
         MaintenanceConnections(SeekDBConfig(path=path, database="custom-db")).run(unexpected, writable=True)
     assert error.value.code == code
     assert "administrator" in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("error_factory", "code"),
+    [
+        (lambda: MissingDatabaseError("custom-db"), "database_missing"),
+        (
+            lambda: connections.DatabaseAccessError("custom-db", "CREATE DATABASE IF NOT EXISTS `custom-db`"),
+            "database_access_denied",
+        ),
+    ],
+)
+def test_seekdb_read_only_inspection_reports_selected_database_error(
+    tmp_path: Path, monkeypatch, error_factory, code
+) -> None:
+    path, _assert_locked = _fake_seekdb(tmp_path, monkeypatch)
+    path.mkdir()
+    (path / "fixture").touch()
+    monkeypatch.setattr(connections.seekdb_profile, "has_native_storage", lambda _path: True)
+
+    async def refuse(_engine, *, name: str) -> None:
+        assert name == "custom-db"
+        raise error_factory()
+
+    monkeypatch.setattr(connections, "require_existing_database", refuse)
+    operation = Mock()
+    with pytest.raises(MigrationError) as error:
+        MaintenanceConnections(SeekDBConfig(path=path, database="custom-db")).run(operation)
+    assert error.value.code == code
+    assert "custom-db" in str(error.value)
+    operation.assert_not_called()
 
 
 def _statement_snapshot_adapter(target):

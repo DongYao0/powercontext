@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import gzip
+import json
 import os
 import subprocess
 import sys
@@ -40,6 +41,7 @@ from sqlalchemy import Column, Index, Integer, MetaData, String, Table, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from typer.testing import CliRunner
 
 from powercontext.builtin.persistence.bootstrap import (
     DatabaseAccessError,
@@ -50,6 +52,8 @@ from powercontext.builtin.persistence.bootstrap import (
 from powercontext.builtin.persistence.oceanbase import OceanBaseConfig, OceanBaseProfile
 from powercontext.builtin.persistence.oceanbase.profile import _register_official_dialect
 from powercontext.builtin.persistence.seekdb import SeekDBConfig, SeekDBProfile
+from powercontext.cli.app import create_cli
+from powercontext.server.cli import app as server_app
 
 _METADATA = MetaData()
 _RECORDS = Table(
@@ -228,6 +232,53 @@ def test_seekdb_inspection_reuses_an_existing_database_without_provisioning(shor
                 assert absent.all() == []
 
     asyncio.run(scenario())
+
+
+@pytest.mark.skipif(not _SEEKDB, reason="set POWERCONTEXT_TEST_BOOTSTRAP_SEEKDB=1")
+def test_seekdb_db_migrate_reports_a_missing_selected_database(short_tmp_path: Path) -> None:
+    pytest.importorskip("pylibseekdb")
+    path = short_tmp_path / "seekdb"
+    retained = SeekDBConfig(path=path, database="retained_context")
+
+    async def seed() -> None:
+        async with SeekDBProfile.open(retained, tables=()):
+            pass
+
+    asyncio.run(seed())
+    environment = short_tmp_path / "server.env"
+    environment.write_text(
+        f"POWERCONTEXT_SERVER_DATABASE_KIND=seekdb\n"
+        f"POWERCONTEXT_SERVER_DATABASE_PATH={path}\n"
+        "POWERCONTEXT_SERVER_DATABASE_DATABASE=absent_context\n",
+        encoding="utf-8",
+    )
+
+    for command in ("status", "plan", "verify"):
+        result = CliRunner().invoke(
+            create_cli([server_app]), ["server", "db-migrate", command, "--env-file", str(environment)]
+        )
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.stdout)
+        assert payload["state"] == "blocked"
+        assert payload["error"] == "database_missing"
+        assert "absent_context" in payload["message"]
+        assert "does not exist" in payload["message"]
+        assert "CREATE DATABASE IF NOT EXISTS `absent_context`" in payload["message"]
+        assert "No fallback database was selected" in payload["message"]
+
+    async def verify() -> None:
+        async with (
+            SeekDBProfile.open_existing(retained, tables=()) as profile,
+            profile.database.transaction() as connection,
+        ):
+            assert (await connection.exec_driver_sql("SELECT DATABASE()")).scalar_one() == retained.database
+            absent = await connection.exec_driver_sql(
+                "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = %s",
+                ("absent_context",),
+            )
+            assert absent.all() == []
+
+    asyncio.run(verify())
 
 
 @pytest.mark.skipif(not _SEEKDB, reason="set POWERCONTEXT_TEST_BOOTSTRAP_SEEKDB=1")

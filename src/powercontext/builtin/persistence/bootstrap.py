@@ -61,8 +61,9 @@ class MissingDatabaseError(PersistenceError):
     def __init__(self, name: str) -> None:
         self.database_name = name
         super().__init__(
-            f"Database {name!r} does not exist. This command inspects the configured database without creating it; "
-            "provision it first, or start the Server once to create the default database, then repeat the command."
+            f"Database {name!r} does not exist. This command inspects the configured database without creating it. "
+            f"Ask an administrator to run {creation_statement(name)}, or use a supported writable bootstrap path, "
+            "then repeat the command. No fallback database was selected."
         )
 
 
