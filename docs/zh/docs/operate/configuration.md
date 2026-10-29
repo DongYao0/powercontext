@@ -555,7 +555,8 @@ export POWERCONTEXT_SERVER_DATABASE_URL="$OCEANBASE_URL"
 URL 必须使用 `mysql+aoceanbase` 驱动、明确的端口，并设置 `charset=utf8mb4`。省略库名时使用 `powercontext`，
 显式库名保持有效。租户必须使用 MySQL 兼容模式。
 
-seekDB 和 OceanBase 都会先创建缺失的目标库，再初始化表；已有可用库不会执行建库语句。
+seekDB 启动和 OceanBase Python SDK 初始化会先创建缺失的目标库，再初始化表；已有可用库不会执行建库语句。
+完整 OceanBase Server 需要先准备数据库并通过显式维护初始化 Server 表结构，再启动服务；自动建库不替代该准入规则。
 建库权限不足时会提供手动准备说明，其他连接错误不会触发回退。seekDB 未显式配置库名时，若在旧 `test` 中检测到
 PowerContext 命名的表，会要求先明确选择数据库。两个后端都会在配置校验阶段拒绝包含反引号的库名，
 不会产生数据库写入；请改用 `team_context` 等不含反引号的名称。自定义名称、权限和旧数据处理见

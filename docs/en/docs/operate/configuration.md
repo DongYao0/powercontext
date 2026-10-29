@@ -616,12 +616,14 @@ export POWERCONTEXT_SERVER_DATABASE_URL="$OCEANBASE_URL"
 The URL must use the `mysql+aoceanbase` driver, include an explicit port, and set `charset=utf8mb4`. An omitted database
 defaults to `powercontext`; an explicit database is preserved. The tenant must use MySQL compatibility mode.
 
-Both seekDB and OceanBase create a missing selected database before initializing tables and reuse existing databases
+seekDB startup and OceanBase Python SDK initialization create a missing selected database before initializing tables and reuse existing databases
 without issuing a database-creation statement. Missing-database creation failures include manual provisioning guidance;
 other connection errors do not trigger fallback. seekDB detects PowerContext-named tables in the old `test` database
 when no name was explicitly configured and requires an explicit choice before initializing a new database.
 Both backends reject database names containing backticks during configuration validation, before any database writes.
 Choose a name without backticks, such as `team_context`.
+Full OceanBase Server deployments require a prepared database and explicit Server schema maintenance before startup;
+database auto-provisioning does not replace that admission contract.
 See [Install and run](../get-started/install-and-run.md) for custom names, permissions, and old seekDB data handling.
 
 ### Embeddings and SQLite vector search
