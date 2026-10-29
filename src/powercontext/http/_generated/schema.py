@@ -8585,7 +8585,7 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                     "timeout_seconds": {"type": "number", "minimum": 0.0, "exclusiveMinimum": True},
                     "max_requests": {"type": "integer", "minimum": 1.0},
                     "config_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-                    "prompt": {"$ref": "#/components/schemas/PreparedContextPromptIdentity", "nullable": True},
+                    "prompt": {"$ref": "#/components/schemas/PreparedContextPromptIdentity"},
                     "non_deterministic": {"type": "boolean"},
                 },
                 "additionalProperties": False,
@@ -8611,7 +8611,7 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                     "selection": {"type": "string", "enum": ["built_in", "artifact"]},
                     "selected_version": {"type": "string"},
                     "compiled_digest": {"type": "string"},
-                    "artifact_address": {"$ref": "#/components/schemas/ArtifactAddress", "nullable": True},
+                    "artifact_address": {"$ref": "#/components/schemas/PreparedContextPromptArtifactAddress"},
                 },
                 "additionalProperties": False,
                 "type": "object",
@@ -8625,6 +8625,17 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                     "compiled_digest",
                     "artifact_address",
                 ],
+                "nullable": True,
+            },
+            "PreparedContextPromptArtifactAddress": {
+                "properties": {
+                    "scope_id": {"type": "string", "maxLength": 256, "minLength": 1, "pattern": ".*\\S.*"},
+                    "artifact": {"$ref": "#/components/schemas/ArtifactReference"},
+                },
+                "additionalProperties": False,
+                "type": "object",
+                "required": ["scope_id", "artifact"],
+                "nullable": True,
             },
             "PreparedContextRerankGroup": {
                 "properties": {

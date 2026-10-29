@@ -1008,7 +1008,7 @@ def _record_rerank_decision(evidence, reranker, prompt, decision, candidate_coun
         prompt=prompt,
         outcome="fallback" if decision.used_fallback else "selected",
         fallback=(decision.fallback_reason or "none") if decision.used_fallback else "none",
-        omitted_count=0 if decision.used_fallback else candidate_count - len(decision.selected_ranks),
+        omitted_count=candidate_count - len(decision.selected_ranks),
     )
 
 

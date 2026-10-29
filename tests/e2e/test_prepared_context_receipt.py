@@ -310,3 +310,51 @@ def test_builtin_model_rerank_captures_effective_settings_and_bound_prompt(tmp_p
     assert config["prompt"]["key"] == "memory.rerank"
     assert config["non_deterministic"] and receipt["non_deterministic"]
     assert receipt["retrieval"]["reranks"][0]["config_id"] == config["config_digest"]
+
+
+def test_empty_rerank_fallback_accounts_for_candidates_dropped_before_assembly(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "pydantic_ai.models.infer_model",
+        lambda _model, **_kwargs: TestModel(custom_output_text='{"selected_ranks":[]}'),
+    )
+    app = create_server_app(
+        settings=ServerSettings(
+            database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'rerank-fallback.db'}"),
+            runtime=RuntimeConfig(memory_rerank_enabled=True),
+            inference=InferenceConfig(generation_model="test"),
+            mcp=McpConfig(enabled=False),
+        ),
+    )
+    with TestClient(app) as client:
+        scope_id = client.get("/v1/scopes/default").json()["scope_id"]
+        for index in range(30):
+            remembered = client.post(
+                "/v1/memory/remember",
+                json={
+                    "scope_id": scope_id,
+                    "kind": "fact",
+                    "text": f"Budget review evidence {index:02d}.",
+                },
+            )
+            assert remembered.status_code == 200, remembered.text
+
+        response = client.post(
+            "/v1/context/prepare",
+            json={
+                "scope_id": scope_id,
+                "query": "budget review",
+                "max_bytes": 32768,
+                "assembly": {"sections": [{"family": "memory", "limit": 8}]},
+                "include_receipt": True,
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    receipt = response.json()["receipt"]
+    (rerank,) = receipt["retrieval"]["reranks"]
+    assert rerank["outcome"] == "fallback"
+    assert rerank["fallback_reason"] == "empty_selection"
+    assert len(receipt["selected"]) == 8
+    omitted = {(item["family"], item["reason"]): item["count"] for item in receipt["omitted"]}
+    assert omitted[("atomic-memory", "rerank_not_selected")] == 14
+    assert omitted[("atomic-memory", "family_limit")] == 8

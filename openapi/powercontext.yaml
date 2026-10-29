@@ -8648,10 +8648,11 @@ components:
         timeout_seconds: {type: number, minimum: 0, exclusiveMinimum: true}
         max_requests: {type: integer, minimum: 1}
         config_digest: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
-        prompt: {$ref: "#/components/schemas/PreparedContextPromptIdentity", nullable: true}
+        prompt: {$ref: "#/components/schemas/PreparedContextPromptIdentity"}
         non_deterministic: {type: boolean}
     PreparedContextPromptIdentity:
       type: object
+      nullable: true
       additionalProperties: false
       required:
         [scope_id, key, definition_version, builtin_version, selection, selected_version,
@@ -8664,7 +8665,20 @@ components:
         selection: {type: string, enum: [built_in, artifact]}
         selected_version: {type: string}
         compiled_digest: {type: string}
-        artifact_address: {$ref: "#/components/schemas/ArtifactAddress", nullable: true}
+        artifact_address: {$ref: "#/components/schemas/PreparedContextPromptArtifactAddress"}
+    PreparedContextPromptArtifactAddress:
+      type: object
+      nullable: true
+      additionalProperties: false
+      required: [scope_id, artifact]
+      properties:
+        scope_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: '.*\S.*'
+        artifact:
+          $ref: "#/components/schemas/ArtifactReference"
     PreparedContextRerankGroup:
       type: object
       additionalProperties: false

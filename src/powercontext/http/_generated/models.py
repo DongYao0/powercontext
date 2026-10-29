@@ -1246,18 +1246,12 @@ class FallbackReason(StrEnum):
     REUSED_FTS_FALLBACK = "reused_fts_fallback"
 
 
-class PreparedContextPromptIdentity(BaseModel):
+class PreparedContextPromptArtifactAddress(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    scope_id: StrictStr
-    key: StrictStr
-    definition_version: StrictStr
-    builtin_version: StrictStr
-    selection: Selection
-    selected_version: StrictStr
-    compiled_digest: StrictStr
-    artifact_address: Annotated[ArtifactAddress | None, Field(...)]
+    scope_id: Annotated[StrictStr, Field(max_length=256, min_length=1, pattern=".*\\S.*")]
+    artifact: ArtifactReference
 
 
 class Outcome2(StrEnum):
@@ -4213,19 +4207,18 @@ class PreparedContextSearchGroup(BaseModel):
     count: Annotated[StrictInt, Field(ge=1)]
 
 
-class PreparedContextRerankConfig(BaseModel):
+class PreparedContextPromptIdentity(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    config_id: Annotated[StrictStr, Field(pattern="^sha256:[0-9a-f]{64}$")]
-    policy_id: StrictStr
-    model: Annotated[StrictStr | None, Field(...)]
-    effective_settings: dict[str, StrictStr | StrictInt | StrictFloat | StrictBool]
-    timeout_seconds: Annotated[StrictFloat, Field(gt=0.0)]
-    max_requests: Annotated[StrictInt, Field(ge=1)]
-    config_digest: Annotated[StrictStr, Field(pattern="^sha256:[0-9a-f]{64}$")]
-    prompt: Annotated[PreparedContextPromptIdentity | None, Field(...)]
-    non_deterministic: StrictBool
+    scope_id: StrictStr
+    key: StrictStr
+    definition_version: StrictStr
+    builtin_version: StrictStr
+    selection: Selection
+    selected_version: StrictStr
+    compiled_digest: StrictStr
+    artifact_address: PreparedContextPromptArtifactAddress | None
 
 
 class BootstrapContextItem(BaseModel):
@@ -4930,14 +4923,19 @@ class PrepareHandoffRequest(BaseModel):
     max_bytes: Annotated[StrictInt, Field(ge=512, le=32768)] = 8000
 
 
-class PreparedContextRetrieval(BaseModel):
+class PreparedContextRerankConfig(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    rounds: Annotated[list[PreparedContextRecallRound], Field(max_length=3)]
-    searches: Annotated[list[PreparedContextSearchGroup], Field(max_length=32)]
-    rerank_configs: Annotated[list[PreparedContextRerankConfig], Field(max_length=8)]
-    reranks: Annotated[list[PreparedContextRerankGroup], Field(max_length=32)]
+    config_id: Annotated[StrictStr, Field(pattern="^sha256:[0-9a-f]{64}$")]
+    policy_id: StrictStr
+    model: Annotated[StrictStr | None, Field(...)]
+    effective_settings: dict[str, StrictStr | StrictInt | StrictFloat | StrictBool]
+    timeout_seconds: Annotated[StrictFloat, Field(gt=0.0)]
+    max_requests: Annotated[StrictInt, Field(ge=1)]
+    config_digest: Annotated[StrictStr, Field(pattern="^sha256:[0-9a-f]{64}$")]
+    prompt: PreparedContextPromptIdentity | None
+    non_deterministic: StrictBool
 
 
 class ExperienceArtifact(BaseModel):
@@ -5245,23 +5243,14 @@ class PreparedHandoff(BaseModel):
     content: HandoffContent
 
 
-class PreparedContextReceipt(BaseModel):
+class PreparedContextRetrieval(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    schema_: Annotated[Schema4, Field(alias="schema")]
-    receipt_id: UUID
-    policy_id: PolicyId
-    query_digest: Annotated[StrictStr, Field(pattern="^sha256:[0-9a-f]{64}$")]
-    content_digest: Annotated[StrictStr | None, Field(pattern="^sha256:[0-9a-f]{64}$")]
-    requested_max_bytes: Annotated[StrictInt, Field(ge=512, le=32768)]
-    used_bytes: Annotated[StrictInt, Field(ge=0)]
-    truncated: StrictBool
-    non_deterministic: StrictBool
-    retrieval: PreparedContextRetrieval
-    selected: Annotated[list[PreparedContextSelectedItem], Field(max_length=32)]
-    omitted: Annotated[list[PreparedContextOmittedGroup], Field(max_length=16)]
-    stages: Annotated[list[PreparedContextStageTiming], Field(max_length=8)]
+    rounds: Annotated[list[PreparedContextRecallRound], Field(max_length=3)]
+    searches: Annotated[list[PreparedContextSearchGroup], Field(max_length=32)]
+    rerank_configs: Annotated[list[PreparedContextRerankConfig], Field(max_length=8)]
+    reranks: Annotated[list[PreparedContextRerankGroup], Field(max_length=32)]
 
 
 class ReviseCandidateRequest(BaseModel):
@@ -5502,17 +5491,23 @@ class HandoffActivation(BaseModel):
     draft: Annotated[HandoffDraft | None, Field(...)]
 
 
-class PreparedContext(BaseModel):
+class PreparedContextReceipt(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    schema_: Annotated[PreparedContextSchema, Field(alias="schema")]
-    status: PreparedContextStatus
-    content: Annotated[StrictStr | None, Field(...)]
-    content_bytes: Annotated[StrictInt, Field(ge=0)]
-    receipt: Annotated[
-        PreparedContextReceipt | None, Field(description="Present only when requested and successfully assembled.")
-    ] = None
+    schema_: Annotated[Schema4, Field(alias="schema")]
+    receipt_id: UUID
+    policy_id: PolicyId
+    query_digest: Annotated[StrictStr, Field(pattern="^sha256:[0-9a-f]{64}$")]
+    content_digest: Annotated[StrictStr | None, Field(pattern="^sha256:[0-9a-f]{64}$")]
+    requested_max_bytes: Annotated[StrictInt, Field(ge=512, le=32768)]
+    used_bytes: Annotated[StrictInt, Field(ge=0)]
+    truncated: StrictBool
+    non_deterministic: StrictBool
+    retrieval: PreparedContextRetrieval
+    selected: Annotated[list[PreparedContextSelectedItem], Field(max_length=32)]
+    omitted: Annotated[list[PreparedContextOmittedGroup], Field(max_length=16)]
+    stages: Annotated[list[PreparedContextStageTiming], Field(max_length=8)]
 
 
 class GeneratedCandidateResponse(BaseModel):
@@ -5577,3 +5572,16 @@ class CandidateHistory(BaseModel):
         extra="forbid",
     )
     versions: list[Candidate]
+
+
+class PreparedContext(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    schema_: Annotated[PreparedContextSchema, Field(alias="schema")]
+    status: PreparedContextStatus
+    content: Annotated[StrictStr | None, Field(...)]
+    content_bytes: Annotated[StrictInt, Field(ge=0)]
+    receipt: Annotated[
+        PreparedContextReceipt | None, Field(description="Present only when requested and successfully assembled.")
+    ] = None

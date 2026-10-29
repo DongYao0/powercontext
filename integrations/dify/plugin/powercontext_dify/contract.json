@@ -3425,56 +3425,82 @@
           }
         }
       },
-      "PreparedContextPromptIdentity": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "scope_id",
-          "key",
-          "definition_version",
-          "builtin_version",
-          "selection",
-          "selected_version",
-          "compiled_digest",
-          "artifact_address"
-        ],
-        "properties": {
-          "scope_id": {
-            "type": "string"
-          },
-          "key": {
-            "type": "string"
-          },
-          "definition_version": {
-            "type": "string"
-          },
-          "builtin_version": {
-            "type": "string"
-          },
-          "selection": {
-            "type": "string",
-            "enum": [
-              "built_in",
+      "PreparedContextPromptArtifactAddress": {
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "scope_id",
               "artifact"
-            ]
-          },
-          "selected_version": {
-            "type": "string"
-          },
-          "compiled_digest": {
-            "type": "string"
-          },
-          "artifact_address": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArtifactAddress"
+            ],
+            "properties": {
+              "scope_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": ".*\\S.*"
               },
-              {
-                "type": "null"
+              "artifact": {
+                "$ref": "#/components/schemas/ArtifactReference"
               }
-            ]
+            }
+          },
+          {
+            "type": "null"
           }
-        }
+        ]
+      },
+      "PreparedContextPromptIdentity": {
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "scope_id",
+              "key",
+              "definition_version",
+              "builtin_version",
+              "selection",
+              "selected_version",
+              "compiled_digest",
+              "artifact_address"
+            ],
+            "properties": {
+              "scope_id": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "definition_version": {
+                "type": "string"
+              },
+              "builtin_version": {
+                "type": "string"
+              },
+              "selection": {
+                "type": "string",
+                "enum": [
+                  "built_in",
+                  "artifact"
+                ]
+              },
+              "selected_version": {
+                "type": "string"
+              },
+              "compiled_digest": {
+                "type": "string"
+              },
+              "artifact_address": {
+                "$ref": "#/components/schemas/PreparedContextPromptArtifactAddress"
+              }
+            }
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "PreparedContextRecallRound": {
         "type": "object",
@@ -3658,14 +3684,7 @@
             "pattern": "^sha256:[0-9a-f]{64}$"
           },
           "prompt": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PreparedContextPromptIdentity"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/PreparedContextPromptIdentity"
           },
           "non_deterministic": {
             "type": "boolean"

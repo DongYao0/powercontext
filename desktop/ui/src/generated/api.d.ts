@@ -3589,7 +3589,7 @@ export interface components {
             timeout_seconds: number;
             max_requests: number;
             config_digest: string;
-            prompt: components["schemas"]["PreparedContextPromptIdentity"] | null;
+            prompt: components["schemas"]["PreparedContextPromptIdentity"];
             non_deterministic: boolean;
         };
         PreparedContextPromptIdentity: {
@@ -3601,8 +3601,12 @@ export interface components {
             selection: "built_in" | "artifact";
             selected_version: string;
             compiled_digest: string;
-            artifact_address: components["schemas"]["ArtifactAddress"] | null;
-        };
+            artifact_address: components["schemas"]["PreparedContextPromptArtifactAddress"];
+        } | null;
+        PreparedContextPromptArtifactAddress: {
+            scope_id: string;
+            artifact: components["schemas"]["ArtifactReference"];
+        } | null;
         PreparedContextRerankGroup: {
             round: number;
             config_id: string;
