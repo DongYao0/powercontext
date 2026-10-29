@@ -658,6 +658,31 @@ The bundled contract digest `5878999ce9e239d6642e4da858074b281ed465629432c578b35
 
 九项传输测试全部通过。当前合同由上述 Server 1da99747 真实协议验收记录资格化，完整 Rust 测试（含随包兼容资格用例）通过。仓库全量钩子仍有未修改代码的既存 Windows Python 类型错误，其余钩子通过。上述结果不代表安装包或 macOS 验收通过。
 
+## Server 9357c2fe protocol qualification
+
+`sqlite-atomic-9357c2fe-v1` qualifies Server source
+`9357c2fe55409a55a612f4a42f883dcf1927b07e` for OpenAPI digest
+`ef00a573b9d57ace1cb8484dd4f39c77f1347bd099655ade5daf82dcb11ac296`.
+The wheel `powercontext-1.3.1.dev327+g9357c2fe5-py3-none-any.whl` has SHA-256
+`3726d6f71523539179c76d02c3111e7b1fed5e0016979efbcf3981663e024dce` and was built from
+that clean source commit.
+
+On macOS 15.7.4 ARM64 with Python 3.11.15, the native `ConnectionManager` and `server_probe`
+passed against four independent wheel-backed SQLite Server processes: anonymous loopback,
+static Bearer, HTTPS with an explicit CA and base path, and an injected authentication provider
+with enforced access. The checks covered discovery, all eleven recorded operations, identity
+change, same-identity revocation of exact reads, Scope pagination, committed writes with lost
+responses remaining unknown without replay, and independent Server survival after the client exited.
+The report is under ignored `.artifacts/real-server.json`.
+
+This qualifies the recorded source, contract and wheel for SQLite protocol behavior on this host.
+It does not qualify the installed UI, Windows, signing, notarization, IME or screen-reader behavior.
+
+`sqlite-atomic-9357c2fe-v1` 将 macOS 15.7.4 ARM64 上的 Server 源码、OpenAPI 摘要及 wheel 摘要绑定。
+原生 `ConnectionManager` 与 `server_probe` 对四种独立 SQLite Server 模式验收通过，覆盖全部十一项协议操作、
+身份变更、同身份权限撤销、Scope 分页、写入响应丢失时不重放，以及 Desktop 退出后 Server 仍运行。
+这只证明所记录构建在该主机上的 SQLite 协议兼容性，不代表 Windows、安装 UI、签名、公证、IME 或屏幕阅读器验收。
+
 ## Remaining release qualification
 
 - Clean standard-user Windows 11, including absent/present WebView2 and bootstrap recovery.
