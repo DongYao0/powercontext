@@ -421,7 +421,7 @@ def test_publishing_jobs_require_upgrade_acceptance_unless_manually_bypassed():
     build = workflow["jobs"]["release-build"]
     assert build["uses"] == "./.github/workflows/upgrade-release.yml"
     assert build["with"]["release"] is True
-    assert build["with"]["selection"] == "automatic"
+    assert build["with"]["selection"] == "full"
     assert build["with"]["skip_upgrade_acceptance"] == (
         "${{ github.event_name == 'workflow_dispatch' && inputs.skip_upgrade_acceptance }}"
     )
@@ -1142,14 +1142,14 @@ def test_parallel_worker_rejects_artifact_changed_during_execution(release, monk
 
 
 @pytest.mark.parametrize("parallel_reports", ["automatic", "seekdb-code", "full"], indirect=True)
-def test_manual_seekdb_code_selection_preserves_publication_boundary(parallel_reports):
+def test_upgrade_selection_requires_all_cases_for_publication(parallel_reports):
     root, prepared, reports, policy = parallel_reports
     plan = json.loads((prepared / "plan.json").read_text())
     selection = plan["selection"]
-    expected = {"automatic": 10, "seekdb-code": 2, "full": 12}[selection]
-    if selection != "seekdb-code":
-        # Model release metadata, as in the existing support-declaration test.
-        # Real sdist validation remains covered by test_upgrade_publication.py.
+    complete = selection != "seekdb-code"
+    expected = 12 if complete else 2
+    if complete:
+        # Model release metadata; real sdist validation is covered separately.
         plan["release"] = True
         plan["release_notes"] = gate.support_text(policy, "en")
         parallel.write_json(prepared / "plan.json", plan)
@@ -1161,15 +1161,19 @@ def test_manual_seekdb_code_selection_preserves_publication_boundary(parallel_re
     verdict = json.loads((root / "accepted/result.json").read_text())
     assert len(verdict["cases"]) == expected
     assert len(verdict["deferred_cases"]) == 12 - expected
-    assert verdict["complete"] is (selection == "full")
-    assert bool(accepted) is (selection != "seekdb-code")
-    if selection == "automatic":
-        assert all(gate.manual_upgrade_case(case) for case in verdict["deferred_cases"])
+    assert verdict["complete"] is complete
+    assert bool(accepted) is complete
+    if complete:
+        assert verdict["status"] == "passed"
         publication = json.loads((root / "accepted/publication.json").read_text())
-        assert publication["complete"] is False
-        assert publication["deferred_cases"] == verdict["deferred_cases"]
-    elif selection == "seekdb-code":
-        assert all(gate.manual_upgrade_case(result["case"]) for result in verdict["cases"])
+        assert publication["complete"] is True
+        assert publication["deferred_cases"] == []
+    else:
+        assert {result["case"]["configuration"] for result in verdict["cases"]} == {
+            "full-server-code",
+            "full-server-vector-code",
+        }
+        assert all(result["case"]["backend"] == "seekdb" for result in verdict["cases"])
         assert not (root / "accepted/publication.json").exists()
         plan["release"] = True
         plan["release_notes"] = gate.support_text(policy, "en")
@@ -1177,16 +1181,22 @@ def test_manual_seekdb_code_selection_preserves_publication_boundary(parallel_re
         with pytest.raises(gate.GateError, match="cannot authorize publication"):
             parallel.collect(root, prepared, reports, root / "release-rejected")
     support = gate.support_text(policy, "en")
-    assert "| seekdb | full-server-code |" not in support
-    assert "| seekdb | full-server-vector-code |" not in support
+    assert "| seekdb | full-server-code |" in support
+    assert "| seekdb | full-server-vector-code |" in support
     assert "| oceanbase | full-server-vector-code |" in support
 
 
 @pytest.mark.parametrize("parallel_reports", ["automatic"], indirect=True)
 @pytest.mark.parametrize("broken", ["missing", "failed", "skipped"])
-def test_manual_waiver_does_not_accept_missing_or_failed_automatic_cases(parallel_reports, broken):
+@pytest.mark.parametrize("configuration", ["full-server-no-vector", "full-server-code", "full-server-vector-code"])
+def test_automatic_acceptance_rejects_missing_failed_or_skipped_seekdb_cases(parallel_reports, broken, configuration):
     root, prepared, reports, _ = parallel_reports
-    path = next(reports.glob("*/result.json"))
+    path = next(
+        path
+        for path in reports.glob("*/result.json")
+        if json.loads(path.read_text())["result"]["case"]["backend"] == "seekdb"
+        and json.loads(path.read_text())["result"]["case"]["configuration"] == configuration
+    )
     if broken == "missing":
         path.unlink()
     elif broken == "failed":
@@ -1203,35 +1213,37 @@ def test_manual_waiver_does_not_accept_missing_or_failed_automatic_cases(paralle
     assert not (root / "accepted/validated-dist").exists()
 
 
-@pytest.mark.parametrize("parallel_reports", ["automatic"], indirect=True)
-def test_automatic_workers_reject_manual_case_execution(parallel_reports):
+@pytest.mark.parametrize("parallel_reports", ["seekdb-code"], indirect=True)
+def test_diagnostic_workers_reject_unselected_case_execution(parallel_reports):
     root, prepared, _reports, _policy = parallel_reports
     plan = json.loads((prepared / "plan.json").read_text())
-    index = next(
-        i for i, case in enumerate(plan["resolved_matrix"]["required_cases"]) if gate.manual_upgrade_case(case)
-    )
+    index = next(i for i, case in enumerate(plan["resolved_matrix"]["required_cases"]) if case["backend"] != "seekdb")
     with pytest.raises(gate.GateError, match="Unselected"):
         parallel.execute_case(root, prepared, index, root / "unexpected-case")
     assert not (root / "unexpected-case").exists()
 
 
-def test_serial_publication_gate_also_waives_only_seekdb_code(release):
+def test_serial_publication_gate_requires_all_twelve_cases(release):
     root, wheel, policy = release
-    policy["automatic_sources"]["profiles"].extend(
+    policy["automatic_sources"]["profiles"] = [
         {"backend": backend, "configuration": configuration, "suite": "tests/release_upgrades/test_example.py"}
         for backend in ("sqlite", "seekdb", "oceanbase")
-        for configuration in ("full-server-code", "full-server-vector-code")
-    )
+        for configuration in (
+            "full-server-no-vector",
+            "full-server-vector",
+            "full-server-code",
+            "full-server-vector-code",
+        )
+    ]
     policy["mode"] = "supported-upgrades"
     parallel.write_json(root / gate.MANIFEST, policy)
     gate.check_docs(root, policy, write=True)
     gate.gate(root, wheel, root / "serial", release=True, release_notes=gate.support_text(policy, "en"))
     result = json.loads((root / "serial/result.json").read_text())
-    assert len(result["cases"]) == 7
-    assert len(result["deferred_cases"]) == 2
-    assert result["complete"] is False
-    assert all(gate.manual_upgrade_case(case) for case in result["deferred_cases"])
-    assert all(not gate.manual_upgrade_case(item["case"]) for item in result["cases"])
+    assert len(result["cases"]) == 12
+    assert result["deferred_cases"] == []
+    assert result["complete"] is True
+    assert result["status"] == "passed"
 
 
 @pytest.mark.parametrize("configuration", ["typo"])

@@ -69,7 +69,7 @@ builtin = [
 ]
 seekdb = [
     "powercontext[builtin]",
-    "pylibseekdb>=1.4.0.post1,<2; sys_platform == 'linux' or sys_platform == 'darwin'",
+    "pylibseekdb>=1.4.0.post2,<2; sys_platform == 'linux' or sys_platform == 'darwin'",
 ]
 client = [
     "httpx[socks]>=0.28,<1",

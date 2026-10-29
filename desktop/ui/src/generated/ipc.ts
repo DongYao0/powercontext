@@ -51,6 +51,18 @@ export type MemorySaveResponse = { changed: boolean, records: Array<AtomicMemory
 export type MemorySearchHit = { artifact: ArtifactReference, text: string, score: number, matched_by: Array<string>, };
 export type MemorySearchResponse = { hits: Array<MemorySearchHit>, };
 export type AtomicMemoryDetail = { artifact: ArtifactReference, kind: string, text: string, source_refs: Array<SourceTypeReference>, };
+export type ObservationUnit = "http_request" | "user_operation";
+export type ObservedOperation = "get_liveness" | "get_server_info" | "get_readiness" | "get_capabilities" | "get_access_principal" | "list_scopes" | "get_scope" | "get_default_scope" | "remember_memory" | "search_memory" | "get_artifact_revision";
+export type ObservationOutcome = "success" | "failure" | "cancelled" | "unknown";
+export type SessionObservation = { unit: ObservationUnit, operation: ObservedOperation, outcome: ObservationOutcome, completedAtMs: number, durationMs: number, httpStatus: number | null, errorCode: SafeError | null, };
+export type OutcomeCounts = { success: number, failure: number, cancelled: number, unknown: number, };
+export type OperationSummary = { unit: ObservationUnit, operation: ObservedOperation, outcomes: OutcomeCounts, sampleCount: number, minDurationMs: number, meanDurationMs: number, maxDurationMs: number, };
+export type SessionCoverage = { desktopSessionOnly: boolean, persistenceEvidence: boolean, httpOperations: Array<ObservedOperation>, userOperations: Array<ObservedOperation>, identityChecksIncluded: boolean, installerOps: boolean, };
+export type SessionSummary = { schemaVersion: number, sessionStartedAtMs: number, windowStartedAtMs: number, generatedAtMs: number, capacity: number, evicted: number,
+/**
+ * Process-lifetime loss count, deliberately not cleared by a window reset.
+ */
+droppedSinceStart: number, coverage: SessionCoverage, operations: Array<OperationSummary>, recent: Array<SessionObservation>, };
 export type AccessAction = "server.observe" | "server.admin" | "scope.read" | "scope.contribute" | "scope.review" | "scope.delegate" | "scope.admin" | "artifact.read" | "artifact.write" | "artifact.share" | "handoff.evidence.inspect" | "handoff.acknowledge" | "prompt.use";
 export type AccessControlMode = "disabled" | "enforced";
 export type AccessMeResponse = { principal: AccessPrincipal, mode: AccessControlMode, resource_kinds: Array<AccessResourceType>, provider_capabilities: AccessProviderCapabilities, artifact_families: Array<ArtifactFamilyAccessCapability>, };

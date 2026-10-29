@@ -20,6 +20,27 @@ cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml
 
 [Desktop CI](../.github/workflows/desktop.yml) also builds a Server wheel, runs real Server and CLI tests, checks Windows credentials and process containment, builds the installer, and exercises installation, the installed UI and uninstallation. Consult the PR checks for the exact commit being reviewed. Reports, logs and screenshots are generated under ignored `.artifacts/` and uploaded as Actions artifacts; do not copy them into the repository.
 
+## Native session observation checks
+
+Windows x64 checks for the native session collector use Rust 1.95.0, Node 24.14.1 and pnpm 11.13.1.
+`cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, all 62 native tests and generated IPC
+checking pass. The new regressions exercise real loopback HTTP sockets with synthetic responses, including
+readiness 503, request versus user-operation counting, millisecond latency, cancellation, unknown writes,
+invalid decoded receipts, reset during an in-flight write, bounded retention, safe projection and collector
+contention/poisoning. Mock Tauri IPC checks exercise the actual capability configuration and reject untrusted
+windows and origins; session commands also work without connection state.
+
+Desktop lint, TypeScript checking, all 98 UI tests and the frontend production build pass. The Desktop OpenAPI
+contract checks pass without contract changes. Website lint and link validation pass, including both locale
+versions of the [session observation contract](../docs/en/development/desktop-session-observations.md).
+`uv lock --locked` and `uv run --locked pytest tests/test_desktop_contract.py -q` pass.
+
+Repository hooks pass except `ty check` on Windows, which reports POSIX-only attributes in unchanged Python files
+under `src/powercontext/builtin/code/` and `tests/builtin/test_native_code.py`. The explicit Linux-target check,
+`uv run --locked ty check --python-platform linux`, passes. The native tests do not qualify an actual Server,
+installed application, clipboard interaction or macOS execution. The This session UI and installed copy flow
+remain separate delivery work; native collection does not make the placeholder page operational.
+
 ## Native discovery acceptance
 
 The native `get_server_info` adapter and full real-Server harness were exercised on Windows x64 on 2026-10-23 with Rust 1.95.0 and Python 3.11.15. The Server sources, project configuration and lock matched baseline commit `c535d816`; the wheel was built at Desktop commit `f2b442fc41f724e206a50f2415a03476abdcdf76` with an unrelated dirty documentation tree. The wheel `powercontext-1.4.1.dev138+gf2b442fc4.d20261023-py3-none-any.whl` had SHA-256 `677812c860dd6f12866afa3b6b3e2e0529a6d37b427187c0ce4f3cd732349551`; the normalized contract digest was `5878999ce9e239d6642e4da858074b281ed465629432c578b3584eec47cbce6c`. All four isolated SQLite Server configurations passed: anonymous loopback, static Bearer, HTTPS with an explicit CA and reverse-proxy base path, and an enforced authentication Provider. Checks covered discovery, Scope selection, Memory save/search/exact revision reads, Principal changes, same-Principal revocation, uncertain writes without replay, pagination and independent Server survival. The Server environment included the declared `jieba==0.42.1` dependency. Results are recorded under ignored `.artifacts/real-server.json`.

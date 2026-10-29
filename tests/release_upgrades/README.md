@@ -2,7 +2,7 @@
 
 `release/upgrade-support.json` requires **positive** 1.3.0 upgrades on SQLite, embedded seekDB, and OceanBase.
 The current `upgrade-required` mode keeps the upgrade support declaration unverified while requiring every automatic case
-to run and pass. The two embedded seekDB Code configurations are temporarily manual and do not block publication. Missing full migration integration (#2154) fails the gate. `supported-upgrades` runs the same
+to run and pass, including both embedded seekDB Code configurations. Missing full migration integration (#2154) fails the gate. `supported-upgrades` runs the same
 matrix and enables publication after the reviewed support declaration is updated. `fresh-install-only` is rejected.
 
 ## Reviewed sources and current target
@@ -75,23 +75,20 @@ PR and publication CI use the same reusable workflow, `upgrade-release.yml`:
 4. **Gate publication:** require all case jobs, including cleanup and artifact upload, to succeed. Only the accepted automatic
    distribution snapshot can reach PyPI or GitHub Release assets. `upgrade-required` still blocks publication.
 
-Temporarily, Main and Release automatically require 10 configurations. Embedded seekDB `full-server-code`
-and `full-server-vector-code` run only on manual request while the available engine exhibits DDL waits.
-In Actions → Main → Run workflow, select the branch and set `upgrade_selection` to `seekdb-code` to run
-those two upgrade configurations alone, or `full` to run all 12. Other Main CI suites still run normally.
-For a PR branch, the equivalent command is:
+Main and Release automatically require all 12 configurations, including embedded seekDB `full-server-code`
+and `full-server-vector-code`. The project requires `pylibseekdb>=1.4.0.post2,<2`, and `uv.lock` pins
+`1.4.0.post2`, which contains the recovered-transaction lock fix from seekdb#1499.
+Both `full` (the default) and `automatic` select the complete matrix.
+
+For focused diagnostics, Actions → Main → Run workflow still accepts `upgrade_selection=seekdb-code`
+to run just the two seekDB Code configurations. Other Main CI suites still run normally:
 
 ```sh
 gh workflow run master.yml --repo oceanbase/powercontext --ref YOUR_BRANCH -f upgrade_selection=seekdb-code
 ```
 
-`automatic` runs the remaining 10. Reports list deferred cases and mark full acceptance incomplete; a passing
-automatic run can expose the tested distributions for publication without evidence from the manual cases.
-A manual-only run produces no publication artifacts and cannot authorize release. Missing, skipped or failed
-automatic cases still block publication, and the reviewed support declaration remains mandatory. Passing
-automatic CI does not certify either seekDB Code configuration; they are excluded from generated supported
-upgrade claims. After validating a fixed seekDB release, remove the temporary `manual_upgrade_case` waiver
-and restore Main and Release to `full` selection.
+A diagnostic subset produces no publication artifacts and cannot authorize release. Missing, skipped or failed
+cases in the full automatic matrix block publication, and the reviewed support declaration remains mandatory.
 
 The fixed required check remains **Upgrade release gate**; on Main it covers only the selected configurations. It fails if the shared workflow fails or is cancelled.
 Each case job has a sixty-minute budget including provisioning; existing thirty-minute command deadlines and
@@ -99,7 +96,7 @@ owned-descendant cleanup remain unchanged. Wall time depends on the slowest case
 not the sum of twelve cases. This increases concurrent runner use and does not promise a fixed speedup.
 
 The runner creates separate source/target environments, installs the exact published source package and the built
-target wheel, verifies their versions, then executes the reviewed suite in an isolated working directory. Repository
+target wheel, pins both seekDB environments to the `pylibseekdb` version in the checkout's `uv.lock`, verifies their versions, then executes the reviewed suite in an isolated working directory. Repository
 pytest configuration and deployment environment variables are excluded. The suite must exercise those installed
 processes, not import the current checkout's runtime in place of either version. Use `-I` when invoking their Python.
 
@@ -238,5 +235,5 @@ engine/driver versions must be considered when interpreting compatibility eviden
 
 The positive path exercises the public `db-migrate` commands, not the historical `atomic-memory-migrate` procedure.
 SQLite tests automatic backup restoration; seekDB and OceanBase explicitly skip backups in this suite and do not
-establish backup/rollback acceptance. The two manual embedded seekDB Code cases require their own successful runs;
-the ten automatic results cannot establish those configurations.
+establish backup/rollback acceptance. Both embedded seekDB Code configurations require successful evidence
+as part of the complete automatic matrix.

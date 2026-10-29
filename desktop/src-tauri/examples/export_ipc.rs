@@ -30,6 +30,10 @@ use powercontext_desktop::{
     diagnostics::{DiagnosticItem, DiagnosticKind, DiagnosticReport, HostDiagnostic},
     error::SafeError,
     ipc::FoundationInfo,
+    session_observations::{
+        ObservationOutcome, ObservationUnit, ObservedOperation, OperationSummary, OutcomeCounts,
+        SessionCoverage, SessionObservation, SessionSummary,
+    },
     transport::{
         ApiFailure, AtomicMemoryDetail, MemorySaveResponse, MemorySearchHit, MemorySearchResponse,
         wire,
@@ -81,6 +85,14 @@ fn main() {
         MemorySearchHit::decl(&config),
         MemorySearchResponse::decl(&config),
         AtomicMemoryDetail::decl(&config),
+        ObservationUnit::decl(&config),
+        ObservedOperation::decl(&config),
+        ObservationOutcome::decl(&config),
+        SessionObservation::decl(&config),
+        OutcomeCounts::decl(&config),
+        OperationSummary::decl(&config),
+        SessionCoverage::decl(&config),
+        SessionSummary::decl(&config),
     ]
     .into_iter()
     .chain(wire::declarations(&config))

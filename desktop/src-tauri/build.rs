@@ -49,6 +49,9 @@ fn main() {
             "cancel_scope_reads",
             "default_scope",
             "select_scope",
+            "session_summary",
+            "reset_session_observations",
+            "preview_session_diagnostics",
         ]),
     ))
     .expect("desktop build configuration is invalid");

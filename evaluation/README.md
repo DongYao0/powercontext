@@ -6,6 +6,7 @@ Python environment and build configuration.
 
 | Directory | Purpose | Suites |
 | --- | --- | --- |
+| [`agent_tool_recovery/`](agent_tool_recovery/README.md) | Agent recovery after failed PowerContext MCP calls | [Agent tool recovery](agent_tool_recovery/README.md) |
 | [`coding/`](coding/README.md) | Coding-task completion and continuation quality | [SWE-bench Pro](coding/swebench_pro/README.md), [Work continuity](coding/work_continuity/README.md) |
 | [`memory/`](memory/README.md) | Memory extraction, retrieval, answer quality, and write-gate evidence | [Atomic extraction](memory/atomic_extraction/README.md), [LoCoMo](memory/locomo/README.md), [LoCoMo-Plus](memory/locomo_plus/README.md), [LongMemEval-V2](memory/longmemeval_v2/README.md), [Memory write gate](memory/write_gate/README.md), [Capture ownership](memory/capture_ownership/README.md) |
 | [`performance/`](performance/README.md) | Load, latency, storage growth, and capacity limits | None yet |
@@ -16,6 +17,7 @@ Python environment and build configuration.
 evaluation/
 ├── pyproject.toml                 # Shared powercontext-eval environment and build
 ├── uv.lock
+├── agent_tool_recovery/            # Agent recovery after failed MCP calls
 ├── artifact_evolution/             # Artifact-evolution recording and faithful replay
 │   ├── src/powercontext_eval_artifact_evolution/
 │   ├── tests/
@@ -55,7 +57,8 @@ evaluation/
 Run these commands from the repository root. LoCoMo and LoCoMo-Plus modules use the root project's
 Python dependencies. SWE-bench Pro, Work continuity, and LongMemEval-V2 share this directory's locked environment and
 expose independent `swebench-pro`, `work-continuity`, and `longmemeval-v2` commands. Skill-up has its own validation
-dependencies and pinned CLI. ZCode guidance uses the root project's dependencies and its pinned native CLI.
+dependencies and pinned CLI. ZCode guidance uses the root project's dependencies and its pinned native CLI. Agent
+tool recovery uses the root project's dependencies and the installed Claude Code and Codex CLIs.
 
 ```bash
 # Install the shared environment, then choose a suite command.
@@ -79,6 +82,10 @@ uv run python evaluation/skills/skill-up/validate_suite.py
 # Native ZCode Skill regression: validate the pin and runner without calling a model.
 uv run --locked python -m evaluation.zcode_guidance.pin --check
 uv run --locked python -m evaluation.zcode_guidance.run --help
+
+# Agent tool recovery: run the offline tests and inspect the real-host runner without calling a model.
+uv run pytest evaluation/agent_tool_recovery/tests
+uv run python -m evaluation.agent_tool_recovery.run --help
 ```
 
 The [SWE-bench Pro console guide](coding/swebench_pro/docs/console.md) covers its Web and worker deployment.
@@ -104,7 +111,7 @@ The `powercontext-eval` distribution contains five packages: `powercontext_eval_
 `swebench-pro`, `work-continuity`, `longmemeval-v2`, and `capture-ownership` commands and their suite modules.
 Capture ownership requires the `capture-ownership` extra shown above.
 LoCoMo behavior tests remain under [`tests/`](../tests/), including [`tests/evaluation/`](../tests/evaluation/).
-Skill-up and ZCode guidance keep their own validation tests. The [Bub replay harness](../e2e/bub/README.md) and
+Skill-up, ZCode guidance, and agent tool recovery keep their own validation tests. The [Bub replay harness](../e2e/bub/README.md) and
 [product E2E tests](../tests/e2e/) cover cross-component acceptance.
 
 Keep fixed datasets, locks, configuration examples, and scoring rules with their owning suite. Store local outputs in

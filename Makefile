@@ -33,6 +33,8 @@ workflow-actions-check: ## Verify third-party GitHub Actions use immutable commi
 	@uv run python scripts/check_workflow_actions.py .github/workflows .github/actions
 	@echo "🚀 Checking lock file consistency with 'pyproject.toml'"
 	@uv lock --locked
+	@uv lock --project e2e/bub --locked
+	@uv lock --project evaluation --locked
 	@echo "🚀 Linting code: Running prek"
 	@uv run prek run -a
 	@echo "🚀 Static type checking: Running ty"
@@ -57,7 +59,7 @@ e2e-test: ## Run CLI to Client SDK to Server end-to-end tests.
 	@uv run python -m pytest -n $(PYTEST_WORKERS) tests/e2e
 
 .PHONY: evaluation-unit-test
-evaluation-unit-test: ## Run the evaluation project's unit tests, the work-continuity benchmark included.
+evaluation-unit-test: ## Run the evaluation unit tests, the work-continuity and agent tool recovery suites included.
 	@uv sync --project evaluation --frozen --extra capture-ownership
 	@uv run --project evaluation --extra capture-ownership pytest -c evaluation/pyproject.toml \
 		evaluation/artifact_evolution/tests \
@@ -65,6 +67,8 @@ evaluation-unit-test: ## Run the evaluation project's unit tests, the work-conti
 		evaluation/coding/work_continuity/tests/unit \
 		evaluation/memory/longmemeval_v2/tests \
 		evaluation/memory/capture_ownership/tests -m "not live" -q
+	@# Agent tool recovery drives the real Server package, so it runs in the root project environment.
+	@uv run --frozen pytest evaluation/agent_tool_recovery/tests -q
 
 .PHONY: code-seekdb-test
 code-seekdb-test: ## Exercise native code indexing against a real embedded seekdb instance.

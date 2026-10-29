@@ -99,7 +99,7 @@ jobs:
     uses: ./.github/workflows/upgrade-release.yml
     with:
       release: true
-      selection: automatic
+      selection: full
       source_ref: ${{ needs.resolve-release.outputs.source_sha }}
       release_tag: ${{ needs.resolve-release.outputs.tag }}
       skip_upgrade_acceptance: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_upgrade_acceptance }}

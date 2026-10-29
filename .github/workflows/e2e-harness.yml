@@ -297,20 +297,24 @@ jobs:
         if: always()
         run: docker rm --force recall-effort-oceanbase || true
 
-  atomic-memory-clean-oceanbase:
-    name: Atomic Memory clean migration (OceanBase)
+  atomic-memory-clean-oceanbase-shards:
+    name: Atomic Memory clean migration (OceanBase shard ${{ matrix.shard }}/3)
     needs: changes
     if: >-
       ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.suite != 'recall-effort') &&
           (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').database) }}
     runs-on: ubuntu-latest
     timeout-minutes: 145
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     env:
       OCEANBASE_IMAGE: ghcr.io/oceanbase/oceanbase-ce:4.3.5.6-106000012026040916
       POWERCONTEXT_TEST_MIGRATION_OCEANBASE_URL: >-
         mysql+aoceanbase://root%40test:powercontext-e2e@127.0.0.1:2881/powercontext_test?charset=utf8mb4
       PYTHONUNBUFFERED: "1"
-      MIGRATION_REPORTS: ${{ github.workspace }}/.powercontext/atomic-memory-clean-oceanbase
+      MIGRATION_REPORTS: ${{ github.workspace }}/.powercontext/atomic-memory-clean-oceanbase-shard-${{ matrix.shard }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -381,28 +385,28 @@ jobs:
         timeout-minutes: 10
         run: |
           uv run --locked python scripts/run_atomic_memory_clean_migration.py \
-            oceanbase --output "$MIGRATION_REPORTS/scope-search" --tests \
+            oceanbase --shard "${{ matrix.shard }}/3" --output "$MIGRATION_REPORTS/scope-search" --tests \
             tests/e2e/test_scope_search_migration.py
 
       - name: Test background listener lifecycle without skips
         timeout-minutes: 5
         run: |
           uv run --locked --extra server python scripts/run_atomic_memory_clean_migration.py \
-            oceanbase --output "$MIGRATION_REPORTS/background-metrics" --tests \
+            oceanbase --shard "${{ matrix.shard }}/3" --output "$MIGRATION_REPORTS/background-metrics" --tests \
             tests/e2e/test_background_metrics.py
 
       - name: Run clean migration evidence, grants and vectors without skips
         timeout-minutes: 60
         run: |
           uv run --locked python scripts/run_atomic_memory_clean_migration.py \
-            oceanbase --output "$MIGRATION_REPORTS/clean-migration"
+            oceanbase --shard "${{ matrix.shard }}/3" --output "$MIGRATION_REPORTS/clean-migration"
 
       - name: Test concurrent managed startup without skips
         # Collection and three isolated cases retain their 180s process deadlines.
         timeout-minutes: 15
         run: |
           uv run --locked --extra server python scripts/run_atomic_memory_clean_migration.py \
-            oceanbase --output "$MIGRATION_REPORTS/startup-snapshot" --tests \
+            oceanbase --shard "${{ matrix.shard }}/3" --output "$MIGRATION_REPORTS/startup-snapshot" --tests \
             tests/e2e/test_managed_startup_read_consistency.py
           test "$(wc -l < "$MIGRATION_REPORTS/startup-snapshot/nodes.txt")" -eq 3
 
@@ -411,7 +415,7 @@ jobs:
         timeout-minutes: 30
         run: |
           uv run --locked python scripts/run_atomic_memory_clean_migration.py \
-            oceanbase --output "$MIGRATION_REPORTS/long-query" --tests \
+            oceanbase --shard "${{ matrix.shard }}/3" --output "$MIGRATION_REPORTS/long-query" --tests \
             tests/e2e/test_atomic_artifact_search_http.py \
             tests/e2e/test_atomic_memory_long_fts_query.py
 
@@ -443,7 +447,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: atomic-memory-clean-oceanbase-${{ github.sha }}
+          name: atomic-memory-clean-oceanbase-${{ github.sha }}-shard-${{ matrix.shard }}
           path: ${{ env.MIGRATION_REPORTS }}/
           include-hidden-files: true
           if-no-files-found: error
@@ -452,6 +456,46 @@ jobs:
       - name: Stop and remove the test instance
         if: always()
         run: docker rm --force atomic-memory-clean-oceanbase || true
+
+  atomic-memory-clean-oceanbase:
+    name: Atomic Memory clean migration (OceanBase)
+    needs: [changes, atomic-memory-clean-oceanbase-shards]
+    if: >-
+      ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.suite != 'recall-effort') &&
+          (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').database) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every shard to succeed
+        env:
+          SHARD_RESULT: ${{ needs.atomic-memory-clean-oceanbase-shards.result }}
+        run: |
+          if [ "$SHARD_RESULT" != success ]; then
+            echo "OceanBase migration shards did not all succeed: $SHARD_RESULT" >&2
+            exit 1
+          fi
+
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Download shard reports into separate directories
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: atomic-memory-clean-oceanbase-${{ github.sha }}-shard-*
+          path: ${{ runner.temp }}/atomic-memory-clean-oceanbase-shards
+          merge-multiple: false
+
+      - name: Verify complete execution coverage
+        run: >-
+          python scripts/check_atomic_memory_migration_shards.py
+          --reports "${{ runner.temp }}/atomic-memory-clean-oceanbase-shards" --shards 3
 
   acceptance:
     needs: validate
