@@ -633,3 +633,42 @@ and checks digest rejection and allowlisted projection; it does not qualify a re
 Use a disposable Server and Scope for installed save/search/read/copy checks. Unit tests do not prove
 those installed workflows. Validate actual Chinese IME, accessibility, Gatekeeper, signing and
 notarization independently before distributing outside the internal preview.
+
+## Independent Ops bridge checks
+
+The native Ops tests exercise streaming with real child processes, malformed/oversized output, deadlines, inherited
+pipe handles, retained references, one-shot approvals, cancellation, resume, binding integrity and Quit continuation.
+Synthetic helpers establish these bridge boundaries; they do not qualify native service-manager mutations.
+
+Two opt-in macOS tests add distinct read-only integration evidence. Prepare the checkout's `ops` dependencies and run
+from the repository root:
+
+```sh
+uv sync --locked --extra ops --extra cli
+POWERCONTEXT_OPS_TEST_PYTHON="$PWD/.venv/bin/python" \
+  cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml \
+  --lib real_current_ops_inspect_and_preflight_with_missing_server_runtime -- --ignored
+```
+
+This test runs the current Python Ops entry in a subprocess with a disposable home, binding and missing Server Python.
+An unavailable native-manager ownership observation must remain a rejected preflight, not become successful cleanup.
+The following test instead copies a complete independently built Ops bundle into a disposable native bridge layout,
+uses the separately supplied approved manifest digest as its packaged pin, and checks inspection/preflight and dependency
+tampering through the actual native verifier and process runner:
+
+```sh
+POWERCONTEXT_OPS_TEST_BUNDLE=/absolute/approved/ops \
+POWERCONTEXT_OPS_TEST_BUNDLE_SHA256="<approved-bundle-json-sha256>" \
+  cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml \
+  --lib actual_independent_bundle_runs_through_native_trust_and_read_only_bridge -- --ignored
+```
+
+Neither command applies a service operation or touches the real user's Server configuration/data. Supply a trusted
+producer artifact and an independently approved digest; calculating a pin from an arbitrary candidate does not establish
+release trust. These checks do not establish signing/notarization, Windows Task Scheduler or macOS LaunchAgent mutation,
+packaged provisioning, or clean-machine acceptance. The optional packaging hook and stable independent helper location
+are documented in [Local Server Ops](../docs/en/docs/operate/local-server-ops.md#provisioning-the-bridge).
+
+上述两项可选检查分别验证源码 Ops 子进程和完整独立分发包与原生桥接的只读兼容性。测试使用临时 home、绑定和状态目录，
+不执行服务修改；真实服务管理器归属无法确认时保留预检拒绝。分发包测试要求另行提供已批准的清单摘要，并检查依赖被改动时
+原生端拒绝启动。这些证据不代替签名／公证、真实服务修改、随包配置或干净机器验收。
