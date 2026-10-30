@@ -634,6 +634,40 @@ Use a disposable Server and Scope for installed save/search/read/copy checks. Un
 those installed workflows. Validate actual Chinese IME, accessibility, Gatekeeper, signing and
 notarization independently before distributing outside the internal preview.
 
+## Existing Server connection journey validation
+
+On 2026-10-28, Windows 10 x64 / Python 3.11.15 / Rust 1.95.0 validated the connection
+journey working tree based on `aedf7beb1ecff2ea1fade6ccdd8e4bf6a298f799`.
+All 130 frontend tests passed, together with TypeScript, lint, generated-contract/icon drift,
+formatting and the production build. The English/Chinese first-use scenarios exercise save,
+passive check, explicit activation, exact selection among duplicate Scope titles, keyboard
+focus and reopening without automatic activation. Other regressions cover cancelled/confirmed
+drafts, partial operation support, rejected stale states, late Scope pages and preserving the
+current page during global Scope selection. UI tests use jsdom with mocked native IPC.
+
+The native real-Server probe additionally asserts that both saving and passive checking leave
+`active` unset before explicit activation and exact Scope selection. The full SQLite harness
+passed anonymous loopback, static Bearer, HTTPS with an explicit CA/base path and enforced
+Provider, followed by save/search/exact reads, unknown-write handling and identity/revocation
+checks. Server source is `aedf7beb1ecff2ea1fade6ccdd8e4bf6a298f799`; wheel
+`powercontext-1.4.2.dev36+gaedf7beb1.d20261028-py3-none-any.whl` has SHA-256
+`fde108a81a872a6228aad54832f2cd8f899a53bb4a7ff5c321871891fdbc5b68`.
+Normalized OpenAPI SHA-256 is
+`c12901b88b8e958c9cd63469298b9a04b9d5e2b0b4564d83b50f7ae95542519a`;
+debug `server_probe.exe` SHA-256 is
+`01bc705b75f7ccb843535b884f7d2a50b7c5d8a5e9d8432b6788dbfafe86a4bf`.
+The run used the explicit disposable fixture qualification with a dirty Desktop working tree;
+production qualification records are unchanged.
+
+Rust formatting, Clippy and IPC drift checks passed. Seven Python contract/fixture tests passed.
+Repository file hooks passed; default Windows `ty check` retains existing POSIX-only attribute
+diagnostics in unchanged Python files, while the Linux-target type check passed.
+The installed WebDriver workflow now expects activation to open the Scope dialog, exercises
+that dialog directly and verifies cleared Memory after selection. That updated installed flow
+was not executed locally. Native WebView/credential behavior, IME, screen readers, small windows,
+scaling and signed Windows 11/macOS acceptance remain platform qualification work. The approved
+local setup/default-Scope handoff remains separate work with #2117; this does not close #2103.
+
 ## Independent Ops bridge checks
 
 The native Ops tests exercise streaming with real child processes, malformed/oversized output, deadlines, inherited

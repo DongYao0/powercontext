@@ -29,6 +29,14 @@ Selecting a saved profile in the global connection menu opens that exact configu
 
 Scope selection also keeps an application-wide pending state. Escape, the close button and the backdrop can close the dialog, but do not cancel an accepted native selection. Memory editing and further Scope switching stay paused until it finishes. Closing a dialog whose trigger is disabled returns focus to the page heading. A late result still updates authoritative native state, while it cannot clear a new connection editor's draft guard. Failures after the dialog has closed appear in the shared error feedback.
 
+## Existing Server connection journey
+
+Saving, checking and activating a profile are separate actions with distinct progress and completion feedback. Saving does not activate a connection; a completed check asks users to review its individual facts. A compatible activation with a verified identity opens the shared exact-Scope picker. Lookup and selection retain their individual operation restrictions. Select the intended Server-returned Scope, using its complete ID to distinguish duplicate titles; the ID also supplies the button's accessible description. The activation guide then opens Memory and focuses its page heading. Closing the guide restores the activation button without choosing a Scope.
+
+Opening the global Scope picker elsewhere keeps the current page after selection and restores focus to its selector. Cancelling draft confirmation preserves the current input. Confirming a successful Scope switch discards the old Memory or connection-editor draft. Native states rejected as stale cannot open the activation guide or finish Scope navigation. Empty results offer another title, an access request or another connection; loading, permission, authentication and compatibility failures remain separate.
+
+Reopening Desktop loads saved profiles without activating a private session. The local setup entry continues to point to Local Server guidance; approved installer results and default-Scope handoff remain owned with #2117.
+
 ## Local Server preparation
 
 Overview remains the initial page. In disconnected Memories, **Set up locally** opens and focuses **Settings & diagnostics → Local Server**; **Connect an existing Server** opens the existing connection editor. Selecting either path does not install software, activate a connection, run diagnostics or probe readiness.
