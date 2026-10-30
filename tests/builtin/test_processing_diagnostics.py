@@ -343,18 +343,26 @@ def test_memory_extraction_rules_attach_business_validation_diagnostics() -> Non
     assert diagnostics.failure_location == "memory-extract"
 
 
-def test_atomic_memory_content_validation_attaches_business_validation_diagnostics() -> None:
-    class EmptyCandidateGenerator:
+@pytest.mark.parametrize(
+    ("text", "description"),
+    [("", "A summary"), ("A fact", "   "), ("A fact", "First\nsecond")],
+)
+def test_atomic_memory_content_validation_attaches_business_validation_diagnostics(text: str, description: str) -> None:
+    class InvalidCandidateGenerator:
         async def generate(self, value):
             del value
             return GenerationResult(
                 output=AtomicMemoryExtractionOutput(
-                    candidates=(AtomicMemoryCandidate(kind="fact", text="", evidence_ids=("evidence-1",)),)
+                    candidates=(
+                        AtomicMemoryCandidate(
+                            kind="fact", text=text, description=description, evidence_ids=("evidence-1",)
+                        ),
+                    )
                 )
             )
 
     pipeline = AtomicMemoryGenerationPipeline(
-        extractor=EmptyCandidateGenerator(),
+        extractor=InvalidCandidateGenerator(),
         reconciler=cast(Any, None),
         estimator=character_token_estimator(),
     )

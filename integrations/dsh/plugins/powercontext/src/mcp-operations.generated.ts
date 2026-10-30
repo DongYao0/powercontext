@@ -89,6 +89,9 @@ export const MCP_OPERATIONS = {
   "get_memory_entry": {
     "readOnly": true
   },
+  "get_recall_manifest": {
+    "readOnly": true
+  },
   "get_scope": {
     "readOnly": true
   },

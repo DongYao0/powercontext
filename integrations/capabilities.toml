@@ -71,6 +71,9 @@ capabilities = ["memory_read"]
 id = "list_atomic_memories"
 capabilities = ["memory_read"]
 [[toolsets.tools]]
+id = "get_recall_manifest"
+capabilities = ["memory_read"]
+[[toolsets.tools]]
 id = "search_atomic_memory"
 capabilities = ["memory_read"]
 [[toolsets.tools]]
@@ -281,6 +284,9 @@ id = "mcp__powercontext__get_atomic_memory_state"
 capabilities = ["memory_read"]
 [[toolsets.tools]]
 id = "mcp__powercontext__list_atomic_memories"
+capabilities = ["memory_read"]
+[[toolsets.tools]]
+id = "mcp__powercontext__get_recall_manifest"
 capabilities = ["memory_read"]
 [[toolsets.tools]]
 id = "mcp__powercontext__search_atomic_memory"
@@ -1090,6 +1096,9 @@ tests = ["integrations/dify/tests/test_plugin_contract.py", "tests/e2e/test_dify
 [[toolsets]]
 id = "kimi-code-mcp"
 probe = "kimi_code_mcp"
+[[toolsets.tools]]
+id = "get_recall_manifest"
+capabilities = ["memory_read"]
 [[toolsets.tools]]
 id = "search_memory"
 capabilities = ["memory_read"]

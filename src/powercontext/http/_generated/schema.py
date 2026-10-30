@@ -10,6 +10,46 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
         "version": "1.4.1",
     },
     "paths": {
+        "/v1/recall/manifest": {
+            "post": {
+                "tags": ["atomic-memory"],
+                "summary": "Read a bounded metadata-only recall manifest",
+                "description": "Lists active Atomic Memory metadata "
+                "only. Empty inventory never proves the "
+                "Scope has no context or authorizes "
+                "skipping prepare_context. Fetch "
+                "selected exact refs with "
+                "get_artifact_revision. Pagination is "
+                "live keyset order, not a cross-request "
+                "snapshot.",
+                "operationId": "get_recall_manifest",
+                "requestBody": {
+                    "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RecallManifestRequest"}}},
+                    "required": True,
+                },
+                "responses": {
+                    "200": {
+                        "description": "Operation completed.",
+                        "content": {
+                            "application/json": {"schema": {"$ref": "#/components/schemas/RecallManifestResponse"}}
+                        },
+                    },
+                    "400": {"$ref": "#/components/responses/InvalidRequest"},
+                    "401": {"$ref": "#/components/responses/Unauthorized"},
+                    "403": {"$ref": "#/components/responses/Forbidden"},
+                    "404": {"$ref": "#/components/responses/NotFound"},
+                    "409": {"$ref": "#/components/responses/Conflict"},
+                    "422": {"$ref": "#/components/responses/InvalidRequest"},
+                    "500": {"$ref": "#/components/responses/InternalError"},
+                    "503": {"$ref": "#/components/responses/Unavailable"},
+                },
+                "x-powercontext-scope-mode": "current",
+                "x-powercontext-access": {
+                    "action": "scope.read",
+                    "resource": {"type": "scope", "scope-id-from": "scope_id"},
+                },
+            }
+        },
         "/v1/atomic-memory/list": {
             "post": {
                 "tags": ["atomic-memory"],
@@ -5592,7 +5632,120 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                 "limits, inventory and "
                 "authorization-principal identity.",
             },
+            "RecallManifestRequest": {
+                "properties": {
+                    "scope_id": {"type": "string", "maxLength": 256, "minLength": 1, "pattern": ".*\\S.*"},
+                    "kind": {"type": "string", "minLength": 1, "nullable": True},
+                    "tags": {"items": {"type": "string", "minLength": 1}, "type": "array", "maxItems": 16},
+                    "tag_match": {"$ref": "#/components/schemas/TagMatch"},
+                    "limit": {"type": "integer", "maximum": 100.0, "minimum": 1.0, "default": 50},
+                    "cursor": {"type": "string", "maxLength": 4096, "nullable": True},
+                },
+                "additionalProperties": False,
+                "type": "object",
+                "required": ["scope_id"],
+            },
+            "RecallManifestEntry": {
+                "properties": {
+                    "ref": {"$ref": "#/components/schemas/ArtifactReference"},
+                    "kind": {"type": "string"},
+                    "description": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "pattern": "^[^\\r\\n\\u0085\\u2028\\u2029]*\\S[^\\r\\n\\u0085\\u2028\\u2029]*$",
+                        "description": "Stored "
+                        "summary, "
+                        "or "
+                        "null "
+                        "for "
+                        "historical "
+                        "records "
+                        "awaiting "
+                        "explicit "
+                        "summary "
+                        "completion. "
+                        "No "
+                        "body "
+                        "is "
+                        "read "
+                        "to "
+                        "synthesize "
+                        "it.",
+                        "nullable": True,
+                    },
+                    "state_version": {"type": "integer", "minimum": 0.0},
+                },
+                "additionalProperties": False,
+                "type": "object",
+                "required": ["ref", "kind", "description", "state_version"],
+            },
+            "RecallManifestResponse": {
+                "properties": {
+                    "items": {
+                        "items": {"$ref": "#/components/schemas/RecallManifestEntry"},
+                        "type": "array",
+                        "maxItems": 100,
+                    },
+                    "next_cursor": {"type": "string", "nullable": True},
+                    "code": {"type": "string", "enum": ["page", "empty_inventory"]},
+                },
+                "additionalProperties": False,
+                "type": "object",
+                "required": ["items", "next_cursor", "code"],
+            },
             "AtomicMemoryState": {"type": "string", "enum": ["active", "forgotten", "merged", "retired"]},
+            "AtomicMemoryReadContent": {
+                "properties": {
+                    "schema": {
+                        "$ref": "#/components/schemas/AtomicMemoryContentSchema",
+                        "default": "powercontext.atomic-memory.v1",
+                    },
+                    "kind": {"type": "string", "maxLength": 128, "minLength": 1},
+                    "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Memory "
+                        "text "
+                        "is "
+                        "NFC-normalized "
+                        "and "
+                        "trimmed "
+                        "before "
+                        "enforcing "
+                        "an "
+                        "8192 "
+                        "UTF-8 "
+                        "byte "
+                        "limit.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "pattern": "^[^\\r\\n\\u0085\\u2028\\u2029]*\\S[^\\r\\n\\u0085\\u2028\\u2029]*$",
+                        "description": "A "
+                        "concise "
+                        "single-line "
+                        "summary "
+                        "of "
+                        "final "
+                        "text, "
+                        "in "
+                        "the "
+                        "same "
+                        "language. "
+                        "Required "
+                        "for "
+                        "new "
+                        "writes.",
+                        "nullable": True,
+                    },
+                },
+                "additionalProperties": False,
+                "type": "object",
+                "required": ["kind", "text"],
+            },
             "AtomicMemoryWriteContent": {
                 "properties": {
                     "schema": {
@@ -5616,6 +5769,46 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                         "UTF-8 "
                         "byte "
                         "limit.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "pattern": "^[^\\r\\n\\u0085\\u2028\\u2029]*\\S[^\\r\\n\\u0085\\u2028\\u2029]*$",
+                        "description": "Optional "
+                        "supplied "
+                        "single-line "
+                        "summary. "
+                        "When "
+                        "omitted, "
+                        "the "
+                        "Server "
+                        "stores "
+                        "a "
+                        "whitespace-collapsed "
+                        "text "
+                        "prefix "
+                        "of "
+                        "at "
+                        "most "
+                        "200 "
+                        "Unicode "
+                        "characters, "
+                        "including "
+                        "a "
+                        "trailing "
+                        "ellipsis "
+                        "when "
+                        "truncated. "
+                        "Explicit "
+                        "writes "
+                        "do "
+                        "not "
+                        "invoke "
+                        "a "
+                        "generation "
+                        "model.",
+                        "nullable": True,
                     },
                 },
                 "additionalProperties": False,
@@ -6772,7 +6965,7 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                             {"$ref": "#/components/schemas/ExperienceProposal"},
                             {"$ref": "#/components/schemas/SkillProposal"},
                             {"$ref": "#/components/schemas/ProfileCandidateProposal"},
-                            {"$ref": "#/components/schemas/AtomicMemoryWriteContent"},
+                            {"$ref": "#/components/schemas/AtomicMemoryReadContent"},
                             {"$ref": "#/components/schemas/TopicMemoryDreamProposal"},
                             {"$ref": "#/components/schemas/HandoffContent"},
                             {"$ref": "#/components/schemas/PromptContent"},
@@ -10707,6 +10900,46 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                     },
                     "reason": {"type": "string", "maxLength": 512, "nullable": True},
                     "expected_revision": {"type": "integer", "minimum": 1.0, "nullable": True},
+                    "description": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "pattern": "^[^\\r\\n\\u0085\\u2028\\u2029]*\\S[^\\r\\n\\u0085\\u2028\\u2029]*$",
+                        "description": "Optional "
+                        "supplied "
+                        "single-line "
+                        "summary. "
+                        "When "
+                        "omitted, "
+                        "the "
+                        "Server "
+                        "stores "
+                        "a "
+                        "whitespace-collapsed "
+                        "text "
+                        "prefix "
+                        "of "
+                        "at "
+                        "most "
+                        "200 "
+                        "Unicode "
+                        "characters, "
+                        "including "
+                        "a "
+                        "trailing "
+                        "ellipsis "
+                        "when "
+                        "truncated. "
+                        "Explicit "
+                        "writes "
+                        "do "
+                        "not "
+                        "invoke "
+                        "a "
+                        "generation "
+                        "model.",
+                        "nullable": True,
+                    },
                 },
                 "additionalProperties": False,
                 "type": "object",

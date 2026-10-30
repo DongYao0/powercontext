@@ -161,6 +161,17 @@ function writeFailureConfirmation(error) {
 //#endregion
 //#region src/operations.generated.ts
 const OPERATIONS = {
+	get_recall_manifest: {
+		method: "POST",
+		path: "/v1/recall/manifest",
+		location: "body",
+		scopeMode: "current",
+		pathParameters: [],
+		queryParams: [],
+		headerParams: [],
+		successStatuses: [200],
+		emptyStatuses: []
+	},
 	list_atomic_memories: {
 		method: "POST",
 		path: "/v1/atomic-memory/list",
@@ -3394,6 +3405,7 @@ const MCP_OPERATIONS = {
 	"get_experience": { "readOnly": true },
 	"get_handoff_report": { "readOnly": true },
 	"get_memory_entry": { "readOnly": true },
+	"get_recall_manifest": { "readOnly": true },
 	"get_scope": { "readOnly": true },
 	"get_skill": { "readOnly": true },
 	"get_topic_memory": { "readOnly": true },

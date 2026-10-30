@@ -83,6 +83,7 @@ _CODEX_FULL_MCP_TOOLS = frozenset({
     "get_experience",
     "get_handoff_report",
     "get_memory_entry",
+    "get_recall_manifest",
     "get_scope",
     "get_skill",
     "get_topic_memory",

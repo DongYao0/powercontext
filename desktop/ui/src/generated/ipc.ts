@@ -249,7 +249,11 @@ export type RememberMemoryRequest = { scope_id: string, kind: string,
 /**
  * Must not exceed 8192 UTF-8 bytes after normalization.
  */
-text: string, reason?: string | null, expected_revision?: number | null, };
+text: string, reason?: string | null, expected_revision?: number | null,
+/**
+ * Optional supplied single-line summary. When omitted, the Server stores a whitespace-collapsed text prefix of at most 200 Unicode characters, including a trailing ellipsis when truncated. Explicit writes do not invoke a generation model.
+ */
+description?: string | null, };
 export type Role = "leader" | "standby";
 export type ScopeDescriptor = { scope_id: string, title: string, summary: string, parent_scope_id?: string | null, context_references: Array<string>, external_references: Array<ScopeExternalReference>, version: number, };
 export type ScopeExternalReference = { kind: string, value: string, };

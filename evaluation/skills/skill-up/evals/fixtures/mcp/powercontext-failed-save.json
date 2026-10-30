@@ -94,6 +94,9 @@
     "get_memory_entry": {
       "error": "unexpected"
     },
+    "get_recall_manifest": {
+      "error": "unexpected"
+    },
     "get_scope": {
       "default": {
         "scope_id": "skill-up-fixture-scope",

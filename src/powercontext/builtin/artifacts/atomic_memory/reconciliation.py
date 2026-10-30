@@ -26,6 +26,7 @@ from powercontext.artifacts import ArtifactRef
 from powercontext.builtin.artifacts.atomic_memory.errors import AtomicMemoryConflictError
 from powercontext.builtin.artifacts.atomic_memory.extraction import LANGUAGE_RULES, TIME_RULES, AtomicMemoryEvidence
 from powercontext.builtin.artifacts.atomic_memory.models import AtomicMemoryContent, AtomicMemoryRead
+from powercontext.builtin.artifacts.atomic_memory.summary import DESCRIPTION_RULES
 from powercontext.builtin.inference import InvalidInferenceOutputError
 from powercontext.builtin.processing_diagnostics import (
     ProcessingDiagnostics,
@@ -66,6 +67,10 @@ historical and late old evidence must not become current. Keep facts that can ch
 different applicability separate. Keep each identity's final decision consistent with previously combined working
 content. Preserve independent historical events, conditions, exceptions and effective dates.
 Never request approval or store conflict markers.
+For every create, revise or merge action, return content containing kind, text and description.
+Apply these rules to the final text:
+{DESCRIPTION_RULES}
+For noop, keep content null.
 {LANGUAGE_RULES}
 Preserve the language of retained, unchanged published facts. Express genuinely new or corrected facts in the
 language of their supporting Source statements; unrelated new evidence must not cause existing facts to be translated.
@@ -78,6 +83,7 @@ class AtomicMemoryComparisonItem(BaseModel):
     item_id: str
     kind: str
     text: str
+    description: str | None = None
     original_refs: tuple[AtomicMemoryRead, ...]
     evidence_ids: tuple[str, ...]
 
@@ -107,6 +113,7 @@ class AtomicMemoryReconciliationContent(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: str = Field(min_length=1, max_length=128)
     text: str = Field(min_length=1)
+    description: str = Field(min_length=1, max_length=200)
 
     @model_validator(mode="before")
     @classmethod
@@ -118,7 +125,7 @@ class AtomicMemoryReconciliationContent(BaseModel):
         content = AtomicMemoryContent.model_validate(value)
         if content.creation is not None:
             raise ValueError("creation metadata is constructed only by the merge service")  # noqa: TRY003
-        return {"kind": content.kind, "text": content.text}
+        return {"kind": content.kind, "text": content.text, "description": content.description}
 
 
 class AtomicMemoryReconciliationOutput(BaseModel):
@@ -157,6 +164,7 @@ class AtomicMemoryWorkingItem:
             item_id=self.key,
             kind=self.content.kind,
             text=self.content.text,
+            description=self.content.description,
             original_refs=self.origins,
             evidence_ids=tuple(item.evidence_id for item in self.evidence),
         )
@@ -229,7 +237,9 @@ class AtomicMemoryWindowWorkset:
         if output.content is None:
             _invalid("write content is missing")
         try:
-            content = AtomicMemoryContent(kind=output.content.kind, text=output.content.text)
+            content = AtomicMemoryContent(
+                kind=output.content.kind, text=output.content.text, description=output.content.description
+            )
         except ValidationError as error:
             raise attach_diagnostics(
                 InvalidInferenceOutputError("atomic-memory-reconcile", "write content is invalid"),

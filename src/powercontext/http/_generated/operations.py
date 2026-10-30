@@ -142,6 +142,8 @@ from powercontext.http._generated.models import (
     PutProfilePolicyRequest,
     QueryArtifactTagsRequest,
     ReadinessResponse,
+    RecallManifestRequest,
+    RecallManifestResponse,
     ReconcileRemoteSkillsRequest,
     ReconcileRemoteSkillsResponse,
     RecordBootstrapDeliveryRequest,
@@ -248,6 +250,32 @@ class AccessRequirement(BaseModel):
     scope_id_field: str | None
     resolver: str
 
+
+GET_RECALL_MANIFEST = Operation[RecallManifestRequest, RecallManifestResponse](
+    method="POST",
+    path="/v1/recall/manifest",
+    operation_id="get_recall_manifest",
+    request_type=RecallManifestRequest,
+    request_location="body",
+    path_parameters=(),
+    response_type=RecallManifestResponse,
+    success_status=200,
+    summary="Read a bounded metadata-only recall manifest",
+    tags=("atomic-memory",),
+    scope_mode="current",
+    responses={
+        200: {"description": "Operation completed."},
+        400: {"$ref": "#/components/responses/InvalidRequest"},
+        401: {"$ref": "#/components/responses/Unauthorized"},
+        403: {"$ref": "#/components/responses/Forbidden"},
+        404: {"$ref": "#/components/responses/NotFound"},
+        409: {"$ref": "#/components/responses/Conflict"},
+        422: {"$ref": "#/components/responses/InvalidRequest"},
+        500: {"$ref": "#/components/responses/InternalError"},
+        503: {"$ref": "#/components/responses/Unavailable"},
+    },
+    access=AccessRequirement(action="scope.read", resource="scope", scope_id_field="scope_id", resolver="request"),
+)
 
 LIST_ATOMIC_MEMORIES = Operation[ListAtomicMemoryRequest, ListAtomicMemoryResponse](
     method="POST",

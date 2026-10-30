@@ -22,7 +22,7 @@ from base64 import urlsafe_b64encode
 from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass, replace
 from hashlib import sha256
-from typing import TYPE_CHECKING, Literal, NoReturn
+from typing import TYPE_CHECKING, Literal, NoReturn, cast
 
 from sqlalchemy import func, literal, select, true, tuple_, update
 from sqlalchemy.exc import OperationalError
@@ -507,7 +507,11 @@ class AtomicMemorySourceWindowProcessor:
             key = workset.add(
                 AtomicMemoryWorkingItem(
                     key=f"candidate:{ordinal}",
-                    content=AtomicMemoryContent(kind=candidate.kind, text=candidate.text),
+                    content=AtomicMemoryContent(
+                        kind=candidate.kind,
+                        text=candidate.text,
+                        description=candidate.description,
+                    ),
                     evidence=selected,
                     sources=tuple(item.source_ref for item in selected),
                     changed=True,
@@ -584,7 +588,10 @@ class AtomicMemorySourceWindowProcessor:
                 )
             except AccessDeniedError:
                 continue
-            content = AtomicMemoryContent(kind=hit.kind, text=hit.text)
+            content = cast(
+                AtomicMemoryContent,
+                self.application.artifacts.decode_content(by_id[hit.artifact_ref.artifact_id]),
+            ).without_creation()
             supported = AtomicMemoryArtifactEvidence(
                 evidence_id=f"artifact:{read.ref.artifact_id}@{read.ref.revision}",
                 artifact_ref=read.ref,

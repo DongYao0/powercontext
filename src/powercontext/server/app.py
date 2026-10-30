@@ -3186,7 +3186,7 @@ async def remember_memory(
     if request.expected_revision is not None:
         raise BaseOperationNotSupportedError("artifact_family", "memory", "collection revision precondition")
     result = await _scoped_atomic_memory(application, request.scope_id).create(
-        (AtomicMemoryContent(kind=request.kind, text=request.text),),
+        (AtomicMemoryContent(kind=request.kind, text=request.text, description=request.description),),
         context=_atomic_execution_context(http_request, REMEMBER_MEMORY.operation_id),
     )
     return mapping.mutation_response(result)

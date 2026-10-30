@@ -309,7 +309,13 @@ class MySQLSchema:
         for revision in self.revisions:
             for state in [*self._prefixes[revision], self._schemas[revision]]:
                 if atomic_name in state["tables"]:
+                    columns = state["tables"][atomic_name]["columns"]
                     state["tables"][atomic_name] = copy.deepcopy(atomic)
+                    # Retain columns introduced after the frozen vector profile
+                    # while preserving its released vector and charset metadata.
+                    state["tables"][atomic_name]["columns"].update({
+                        name: copy.deepcopy(column) for name, column in columns.items() if name not in atomic["columns"]
+                    })
                 if revision != source:
                     state["tables"].update(copy.deepcopy(tables))
         self._statements[source] = tuple(

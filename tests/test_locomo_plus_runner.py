@@ -474,7 +474,12 @@ class _MemoryExtractor:
         return GenerationResult(
             output=AtomicMemoryExtractionOutput(
                 candidates=tuple(
-                    AtomicMemoryCandidate(kind="fact", text=text, evidence_ids=(evidence.evidence_id,))
+                    AtomicMemoryCandidate(
+                        kind="fact",
+                        text=text,
+                        evidence_ids=(evidence.evidence_id,),
+                        description="Extracted fixture fact",
+                    )
                     for evidence in request.evidence
                     if (text := memory_source_text(evidence)) is not None
                 )
@@ -512,7 +517,9 @@ def test_sqlite_reuse_preserves_configured_processing_manifest(tmp_path: Path, m
             output = AtomicMemoryReconciliationOutput(
                 action="create",
                 compared_ids=tuple(item.item_id for item in request.related),
-                content=AtomicMemoryReconciliationContent(kind=request.proposal.kind, text=request.proposal.text),
+                content=AtomicMemoryReconciliationContent(
+                    kind=request.proposal.kind, text=request.proposal.text, description="Reconciled fixture fact"
+                ),
                 evidence_ids=request.proposal.evidence_ids,
                 reason="Preserve the recorded dialogue.",
             ).model_dump_json(by_alias=True)
@@ -1521,7 +1528,9 @@ def test_extraction_corrects_invalid_json_within_the_configured_request_budget(
         output = AtomicMemoryReconciliationOutput(
             action="create",
             compared_ids=tuple(item.item_id for item in request.related),
-            content=AtomicMemoryReconciliationContent(kind=request.proposal.kind, text=request.proposal.text),
+            content=AtomicMemoryReconciliationContent(
+                kind=request.proposal.kind, text=request.proposal.text, description="Reconciled fixture fact"
+            ),
             evidence_ids=request.proposal.evidence_ids,
             reason="Preserve each recorded dialogue with its exact Source evidence.",
         )

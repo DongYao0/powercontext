@@ -91,7 +91,12 @@ class _ContentMemoryPipeline:
         return GenerationResult(
             output=AtomicMemoryExtractionOutput(
                 candidates=tuple(
-                    AtomicMemoryCandidate(kind="fact", text=text, evidence_ids=(evidence.evidence_id,))
+                    AtomicMemoryCandidate(
+                        kind="fact",
+                        text=text,
+                        evidence_ids=(evidence.evidence_id,),
+                        description="Extracted fixture fact",
+                    )
                     for evidence in request.evidence
                     if (text := memory_source_text(evidence)) is not None
                 )
@@ -340,7 +345,11 @@ def test_base_source_and_artifact_routes_preserve_access_boundaries(tmp_path: Pa
                     scope.scope_id,
                     CreateArtifactRequest.model_validate({
                         "family": "atomic-memory",
-                        "content": {"kind": "preference", "text": "Use concise answers."},
+                        "content": {
+                            "kind": "preference",
+                            "text": "Use concise answers.",
+                            "description": "Explicit fixture memory",
+                        },
                     }),
                 )
                 memory_head = await owner.get_artifact(scope.scope_id, "atomic-memory", memory.artifact_id)
@@ -350,7 +359,11 @@ def test_base_source_and_artifact_routes_preserve_access_boundaries(tmp_path: Pa
                     "atomic-memory",
                     memory.artifact_id,
                     ReplaceArtifactRequest.model_validate({
-                        "content": {"kind": "preference", "text": "Use concise Chinese answers."}
+                        "content": {
+                            "kind": "preference",
+                            "text": "Use concise Chinese answers.",
+                            "description": "Explicit fixture memory",
+                        }
                     }),
                     expected_etag='"revision:1"',
                 )
@@ -807,7 +820,11 @@ def test_tag_owners_and_exact_viewers_preserve_scope_boundaries(tmp_path: Path, 
                 source = await owner.create_source(scope.scope_id, CreateSourceRequest(content="Tag access evidence"))
                 content = {
                     "profile": {"content": "# Profile\n\nTest before release."},
-                    "atomic-memory": {"kind": "fact", "text": "Private release rule"},
+                    "atomic-memory": {
+                        "kind": "fact",
+                        "text": "Private release rule",
+                        "description": "Explicit fixture memory",
+                    },
                     "experience": {
                         "situation": "Release",
                         "action": "Test",

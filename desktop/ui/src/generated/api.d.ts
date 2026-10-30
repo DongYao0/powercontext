@@ -16,6 +16,26 @@
 
 // Generated from openapi/powercontext.yaml. Do not edit.
 export interface paths {
+    "/v1/recall/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read a bounded metadata-only recall manifest
+         * @description Lists active Atomic Memory metadata only. Empty inventory never proves the Scope has no context or authorizes skipping prepare_context. Fetch selected exact refs with get_artifact_revision. Pagination is live keyset order, not a cross-request snapshot.
+         */
+        post: operations["get_recall_manifest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/atomic-memory/list": {
         parameters: {
             query?: never;
@@ -2313,14 +2333,47 @@ export interface components {
                 [key: string]: components["schemas"]["FeatureContract"];
             };
         };
+        RecallManifestRequest: {
+            scope_id: string;
+            kind?: string | null;
+            tags?: string[];
+            tag_match?: components["schemas"]["TagMatch"];
+            /** @default 50 */
+            limit: number;
+            cursor?: string | null;
+        };
+        RecallManifestEntry: {
+            ref: components["schemas"]["ArtifactReference"];
+            kind: string;
+            /** @description Stored summary, or null for historical records awaiting explicit summary completion. No body is read to synthesize it. */
+            description: string | null;
+            state_version: number;
+        };
+        RecallManifestResponse: {
+            items: components["schemas"]["RecallManifestEntry"][];
+            next_cursor: string | null;
+            /** @enum {string} */
+            code: "page" | "empty_inventory";
+        };
         /** @enum {string} */
         AtomicMemoryState: "active" | "forgotten" | "merged" | "retired";
+        AtomicMemoryReadContent: {
+            /** @default powercontext.atomic-memory.v1 */
+            schema: components["schemas"]["AtomicMemoryContentSchema"];
+            kind: string;
+            /** @description Memory text is NFC-normalized and trimmed before enforcing an 8192 UTF-8 byte limit. */
+            text: string;
+            /** @description A concise single-line summary of final text, in the same language. Required for new writes. */
+            description?: string | null;
+        };
         AtomicMemoryWriteContent: {
             /** @default powercontext.atomic-memory.v1 */
             schema: components["schemas"]["AtomicMemoryContentSchema"];
             kind: string;
             /** @description Memory text is NFC-normalized and trimmed before enforcing an 8192 UTF-8 byte limit. */
             text: string;
+            /** @description Optional supplied single-line summary. When omitted, the Server stores a whitespace-collapsed text prefix of at most 200 Unicode characters, including a trailing ellipsis when truncated. Explicit writes do not invoke a generation model. */
+            description?: string | null;
         };
         CreateAtomicMemoryArtifactRequest: {
             /**
@@ -2914,7 +2967,7 @@ export interface components {
             version: number;
             family: components["schemas"]["CandidateFamily"];
             status: components["schemas"]["CandidateStatus"];
-            proposal: components["schemas"]["ExperienceProposal"] | components["schemas"]["SkillProposal"] | components["schemas"]["ProfileCandidateProposal"] | components["schemas"]["AtomicMemoryWriteContent"] | components["schemas"]["TopicMemoryDreamProposal"] | components["schemas"]["HandoffContent"] | components["schemas"]["PromptContent"] | components["schemas"]["CatalogChangeProposal"];
+            proposal: components["schemas"]["ExperienceProposal"] | components["schemas"]["SkillProposal"] | components["schemas"]["ProfileCandidateProposal"] | components["schemas"]["AtomicMemoryReadContent"] | components["schemas"]["TopicMemoryDreamProposal"] | components["schemas"]["HandoffContent"] | components["schemas"]["PromptContent"] | components["schemas"]["CatalogChangeProposal"];
             /** @description Exact Source evidence. Counted with artifact_refs toward a combined maximum of 32 references. */
             source_refs: components["schemas"]["SourceReference"][];
             /** @description Exact Artifact evidence. Counted with source_refs toward a combined maximum of 32 references. */
@@ -4416,6 +4469,8 @@ export interface components {
             text: string;
             reason?: string | null;
             expected_revision?: number | null;
+            /** @description Optional supplied single-line summary. When omitted, the Server stores a whitespace-collapsed text prefix of at most 200 Unicode characters, including a trailing ellipsis when truncated. Explicit writes do not invoke a generation model. */
+            description?: string | null;
         };
         RetireMemoryEntryRequest: {
             scope_id: string;
@@ -5358,6 +5413,38 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_recall_manifest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecallManifestRequest"];
+            };
+        };
+        responses: {
+            /** @description Operation completed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecallManifestResponse"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["InvalidRequest"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
     list_atomic_memories: {
         parameters: {
             query?: never;

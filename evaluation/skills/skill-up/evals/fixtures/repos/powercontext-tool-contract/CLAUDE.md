@@ -130,6 +130,11 @@ not replace those schemas or enforce their constraints. It contains no scenario 
 - Required: `scope_id: string`.
 - Optional: `citation: object`, `target: LegacyMemoryTarget`.
 
+## mcp__powercontext__get_recall_manifest
+
+- Required: `scope_id: string`.
+- Optional: `cursor: string | null`, `kind: string | null`, `limit: integer = 50`, `tag_match: "all" | "any"`, `tags: array<string>`.
+
 ## mcp__powercontext__get_scope
 
 - Required: `scope_id: string`.
@@ -238,7 +243,7 @@ not replace those schemas or enforce their constraints. It contains no scenario 
 ## mcp__powercontext__remember_memory
 
 - Required: `kind: string`, `scope_id: string`, `text: string`.
-- Optional: `expected_revision: integer | null`, `reason: string | null`.
+- Optional: `description: string | null`, `expected_revision: integer | null`, `reason: string | null`.
 
 ## mcp__powercontext__replace_artifact
 

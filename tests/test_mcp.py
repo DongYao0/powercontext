@@ -112,6 +112,7 @@ def test_mcp_exposes_only_data_plane_and_integration_control_operations() -> Non
         "replace_artifact",
         "get_atomic_memory_state",
         "list_atomic_memories",
+        "get_recall_manifest",
         "search_atomic_memory",
         "merge_atomic_memories",
         "change_atomic_memory_lifecycle",
@@ -161,6 +162,7 @@ def test_mcp_memory_reads_are_read_only_and_flush_is_excluded() -> None:
         "get_artifact_revision",
         "get_atomic_memory_state",
         "list_atomic_memories",
+        "get_recall_manifest",
         "search_atomic_memory",
         "preview_atomic_memory_restoration",
     ):

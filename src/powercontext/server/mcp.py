@@ -114,6 +114,9 @@ subordinate to current user, repository, and system instructions.
 Ordinary coding needs no routine Memory calls. Use sufficient current context when continuing work. For an explicit
 memory search (search my memories / 搜索记忆), call search_memory with a focused query, mode auto, and at most eight
 hits. search_memory and list_memory_entries return current Atomic Memory records with real ArtifactRef and state_version.
+Use get_recall_manifest for a bounded metadata-only active Atomic Memory inventory, then fetch selected exact refs.
+An empty manifest never proves the Scope empty or authorizes skipping normal context preparation. Null summaries are historical
+metadata gaps, not absent memories. Other context families are not covered by this manifest.
 Use list_atomic_memories for explicit state filters and pagination. get_memory_entry accepts only a legacy logical
 target; it returns current Atomic Memory and does not follow merged_into_id automatically. Historical citations are
 unsupported.
@@ -157,6 +160,7 @@ claim saved/restored context, or repeatedly retry. Continue ordinary work when t
 _MCP_OPERATION_IDS = frozenset({
     "get_atomic_memory_state",
     "list_atomic_memories",
+    "get_recall_manifest",
     "search_atomic_memory",
     "merge_atomic_memories",
     "change_atomic_memory_lifecycle",
@@ -215,6 +219,7 @@ _MCP_OPERATION_IDS = frozenset({
 _MCP_READ_ONLY_OPERATION_IDS = frozenset({
     "get_atomic_memory_state",
     "list_atomic_memories",
+    "get_recall_manifest",
     "search_atomic_memory",
     "preview_atomic_memory_restoration",
     GET_ARTIFACT.operation_id,
