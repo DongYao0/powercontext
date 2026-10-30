@@ -56,7 +56,7 @@ identity，仍使用原有事务语义。
 
 向量维护要求声明与历史数据完全一致的 embedding profile：profile ID、模型、维度、距离和归一化方式。迁移保留历史向量及 Topic 检索配置，不调用 embedding provider。SQLite 的登记步骤添加并回填 Atomic Memory 的 vec0 辅助索引和事务触发器；原生后端保留登记的向量列与 HNSW 参数。`pc_server_storage_profile` 保存完整的 embedding 配置，不是另一张 revision 表或恢复日志。通用存储读入口校验该声明，Server 启动使用配置或注入模型的实际 profile。受管辅助对象缺失或 profile 变化会在启动修补或写入之前被拒绝。
 
-空的持久 SQLite/seekDB Server 启用向量时，通过同一版本链所选的 profile 初始化。已有未受管库必须显式维护，且来源结构必须与登记布局完全一致。切换配置不能绕过准入检查，不能给受管无向量库直接启用向量，也不能隐式增加向量或 Code 对象。已经受管但没有 Code 表的数据库若要启用嵌入式 Code，需要另行登记配置转换，启动入口与独立 Code CLI 均拒绝隐式扩展。测试目录保留 1.3.0 来源、三个后端、向量开关及 Code 开关组成的 12 种组合。当前嵌入式 seekDB 的两个 Code 配置暂时仅手动运行，发布豁免这两项；自动 CI 和发布要求其余 10 项通过。在 Main 工作流手动选择 `upgrade_selection=seekdb-code` 可执行这两项。自动门禁通过不能证明这两个配置已通过升级验收。1.4.0 桥接仍保留登记，但不纳入 CI 升级验收；门禁通过不能证明该路径已通过验收。Code 配置用各自实际安装的来源版本创建索引，保留缓存文件与嵌入式图数据，并在升级后查询原指纹和符号。向量配置保留非空的历史 Atomic 与 Topic 向量，通过实际安装的目标包验证语义读取和新写入，拒绝 profile 漂移，并对比新建库与升级库。SQLite 还验证辅助对象缺失时的拒绝行为及备份还原。无向量配置通过不能证明向量支持，只有实际目标安装包通过对应配置的验收，才能声明该配置的升级支持。
+空的持久 SQLite/seekDB Server 启用向量时，通过同一版本链所选的 profile 初始化。已有未受管库必须显式维护，且来源结构必须与登记布局完全一致。切换配置不能绕过准入检查，不能给受管无向量库直接启用向量，也不能隐式增加向量或 Code 对象。已经受管但没有 Code 表的数据库若要启用嵌入式 Code，需要另行登记配置转换，启动入口与独立 Code CLI 均拒绝隐式扩展。测试目录保留 1.3.0 来源、三个后端、向量开关及 Code 开关组成的 12 种组合。嵌入式 seekDB 要求使用包含恢复事务锁修复的 pylibseekdb 1.4.0.post2 或更新版本。自动 CI 和发布要求全部 12 项通过，包括两个嵌入式 seekDB Code 配置，不豁免任何组合。在 Main 工作流手动选择 `upgrade_selection=seekdb-code` 仅执行诊断子集，不能据此授权发布。1.4.0 桥接仍保留登记，但不纳入 CI 升级验收；门禁通过不能证明该路径已通过验收。Code 配置用各自实际安装的来源版本创建索引，保留缓存文件与嵌入式图数据，并在升级后查询原指纹和符号。向量配置保留非空的历史 Atomic 与 Topic 向量，通过实际安装的目标包验证语义读取和新写入，拒绝 profile 漂移，并对比新建库与升级库。SQLite 还验证辅助对象缺失时的拒绝行为及备份还原。无向量配置通过不能证明向量支持，只有实际目标安装包通过对应配置的验收，才能声明该配置的升级支持。
 
 `--bundle artifacts` 保留 `p0001` 开始的局部 Artifact 原型链；`--bundle topic-memory-recovery` 只处理登记的 Topic 恢复布局。两者均报告 `server_ready=false`，不得用于证明完整 Server 就绪，也不能把其版本号直接 stamp 为完整 Server 版本。
 
@@ -271,7 +271,7 @@ powercontext server db-migrate apply --env-file deployment.env --backup manual \
 
 OceanBase 维护须能通过 `effective_tenant_id()`、`oceanbase.GV$OB_PARAMETERS`、`oceanbase.DBA_OB_TENANTS` 读取租户 ID、集群 ID 和租户创建信息。权限不足或身份信息不完整时返回 `target_identity_unavailable`，不以代理主机名代替数据库身份。
 
-seekdb 只读检查遇到缺失路径或空目录时不启动引擎；非空目录缺少可识别的引擎结构时返回 `unsupported_target`。打开有效的已有引擎可能写入原生日志和引擎维护文件；只读迁移命令不执行业务 DDL、不初始化表。
+seekdb 只读检查遇到缺失路径或空目录时不启动引擎；非空目录缺少可识别的引擎结构时返回 `unsupported_target`。未显式配置库名、而旧 `test` 库中仍有 PowerContext 表时返回 `explicit_database_required`，不会隐式选择任一数据库；显式选定库名后重跑该命令。已有引擎中缺少所选数据库时，`status` 和 `verify` 返回带库名和准备指引的 `database_missing`；`plan` 不创建数据库，而是返回绑定所选库的 `uninitialized` 计划。操作员确认计划后，`apply` 才可创建数据库并初始化已登记的结构。访问被拒时返回 `database_access_denied`。可写 seekDB 维护无法创建配置指定的库时返回 `database_creation_required`，权限被拒且无法确认库是否存在时返回 `database_access_denied`；两者都在载荷中保留管理员语句与准备指引。打开有效的已有引擎可能写入原生日志和引擎维护文件；只读迁移命令不执行业务 DDL、不初始化表。
 
 `--evidence-dir PATH` 指定目标库之外的持久目录，保存维护进度及恢复引用。`status`、`plan`、`apply`、`verify` 和重试必须使用同一目录；进程、容器或迁移 Job 退出后仍须保留。每个数据库使用独立目录，并限制为迁移操作者可访问。
 

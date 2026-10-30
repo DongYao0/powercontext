@@ -303,6 +303,8 @@ def environment_for(case, *, fresh=False):
         environment["POWERCONTEXT_SERVER_DATABASE_URL"] = f"sqlite+aiosqlite:///{database}"
     elif backend == "seekdb":
         environment["POWERCONTEXT_SERVER_DATABASE_PATH"] = str(database)
+        if not fresh:
+            environment["POWERCONTEXT_SERVER_DATABASE_DATABASE"] = "test"
     else:
         name = "PC_UPGRADE_OCEANBASE_FRESH_URL" if fresh else "PC_UPGRADE_OCEANBASE_URL"
         url = os.environ[name]
@@ -341,6 +343,7 @@ def snapshot(case, role, name, *, fresh=False):
             case["backend"],
             "--database",
             str(case["work"] / ("fresh" if fresh else "database")),
+            *(["--seekdb-database", "powercontext"] if case["backend"] == "seekdb" and fresh else []),
             "--output",
             str(path),
         ],
@@ -348,7 +351,10 @@ def snapshot(case, role, name, *, fresh=False):
         case["work"],
         case["report"] / f"{name}-probe.log",
     )
-    return json.loads(path.read_text())
+    result = json.loads(path.read_text())
+    if case["backend"] == "seekdb":
+        assert result["database"] == ("powercontext" if fresh else "test")
+    return result
 
 
 def task_state(case, role, operation, scope):
@@ -580,6 +586,17 @@ def historical(case):
 @pytest.fixture(scope="session")
 def rejected_legacy_startup(case, historical):
     before = snapshot(case, "target", "before-rejected-startup")
+    if case["backend"] == "seekdb":
+        implicit_environment = environment_for(case)
+        implicit_environment.pop("POWERCONTEXT_SERVER_DATABASE_DATABASE")
+        implicit_log = case["report"] / "implicit-legacy-target-server.log"
+        with (
+            pytest.raises(AssertionError, match="Server exited before readiness"),
+            server(case["target"], implicit_environment, case["work"], implicit_log),
+        ):
+            pytest.fail("The target Server switched away from the historical seekdb database")
+        assert "explicit_database_required" in implicit_log.read_text()
+        assert "POWERCONTEXT_SERVER_DATABASE_DATABASE=test" in implicit_log.read_text()
     log = case["report"] / "legacy-target-server.log"
     with (
         pytest.raises(AssertionError, match="Server exited before readiness"),

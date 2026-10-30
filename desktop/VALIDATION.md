@@ -57,7 +57,9 @@ The real Server harness covers SQLite with anonymous loopback, static Bearer, HT
 
 Selecting a compatibility profile does not attest the remote binary identity. Existing `sqlite-1.1.1-v1` / `sqlite-63f918b7-v1` / `sqlite-ab43e3a7-v1` / `sqlite-f1089f4e-v1` / `sqlite-6e237568-v1` / `sqlite-legacy-58f7f4f6-v1` selections require explicitly choosing an available matching profile and rechecking the connection. Desktop reads memories only through Atomic Memory references, so Servers that answer only with Memory entry citations are not qualified. CLI diagnostics separately verify the registered executable path and digest, then validate the diagnostic response schema. The observed version is optional report information; a registration does not require a version.
 
-### Current Server protocol qualification
+<a id="current-server-protocol-qualification"></a>
+
+### Server protocol qualification records
 
 #### Server 4ffdf4e9 protocol qualification
 

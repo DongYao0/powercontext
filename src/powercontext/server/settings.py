@@ -24,11 +24,13 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, InitSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
+from typing_extensions import override
 
 from powercontext.builtin.artifacts.skill import AgentSkillTarget
 from powercontext.builtin.code.models import CodeConfig
 from powercontext.builtin.persistence.oceanbase import OceanBaseConfig
+from powercontext.builtin.persistence.seekdb import SeekDBConfig
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
 from powercontext.builtin.runtime.config import (
     DatabaseConfig,
@@ -230,6 +232,26 @@ class ServerSettings(BaseSettings):
     handoff_report: HandoffReportConfig = Field(default_factory=HandoffReportConfig)
     inference: InferenceConfig = Field(default_factory=InferenceConfig)
     external_skills: ExternalSkillsConfig = Field(default_factory=ExternalSkillsConfig)
+
+    @classmethod
+    @override
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        if isinstance(init_settings, InitSettingsSource) and init_settings.nested_model_default_partial_update:
+            database = init_settings.init_kwargs.get("database")
+            if isinstance(database, SeekDBConfig) and "database" not in database.model_fields_set:
+                # BaseSettings serializes nested model defaults before validation. Keep an
+                # omitted name implicit so legacy detection and environment selection work.
+                init_settings.init_kwargs["database"] = database.model_dump(exclude={"database"})
+        return super().settings_customise_sources(
+            settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+        )
 
     @field_validator("cursor_signing_secret")
     @classmethod
