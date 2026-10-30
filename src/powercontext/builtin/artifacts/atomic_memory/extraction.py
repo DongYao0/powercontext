@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
 
 from powercontext.artifacts import ArtifactRef
 from powercontext.builtin.artifacts.atomic_memory.models import AtomicMemoryContent
@@ -27,6 +27,12 @@ from powercontext.builtin.artifacts.memory.prompts import MemoryExtractionProfil
 from powercontext.builtin.inference import InvalidInferenceOutputError, StructuredGenerator, TokenEstimator
 from powercontext.builtin.persistence.records import _canonical_source_text
 from powercontext.builtin.persistence.sources import SourceRepository, StoredSource
+from powercontext.builtin.processing_diagnostics import (
+    ProcessingDiagnostics,
+    ProcessingFailureReason,
+    ProcessingStage,
+    attach_diagnostics,
+)
 from powercontext.sources import TEXT_EVIDENCE_PROJECTION_KEY, Source, SourceObservation, SourceRef, TextEvidence
 
 _JSON = TypeAdapter(JsonValue)
@@ -137,13 +143,38 @@ class AtomicMemoryGenerationPipeline:
 
     async def extract(self, value: AtomicMemoryExtractionInput) -> tuple[AtomicMemoryCandidate, ...]:
         result = await self.extractor.generate(value)
-        output = AtomicMemoryExtractionOutput.model_validate(result.output)
+        try:
+            output = AtomicMemoryExtractionOutput.model_validate(result.output)
+        except ValidationError as error:
+            raise attach_diagnostics(
+                InvalidInferenceOutputError("atomic-memory-extract", "output does not match the extraction schema"),
+                ProcessingDiagnostics(
+                    stage=ProcessingStage.OUTPUT_PARSING,
+                    reason=ProcessingFailureReason.SCHEMA_INVALID,
+                    failure_location="atomic-memory-extract",
+                ),
+            ) from error
         supplied = {item.evidence_id for item in value.evidence}
         for candidate in output.candidates:
-            AtomicMemoryContent(kind=candidate.kind, text=candidate.text)
+            try:
+                AtomicMemoryContent(kind=candidate.kind, text=candidate.text)
+            except ValidationError as error:
+                raise attach_diagnostics(
+                    InvalidInferenceOutputError("atomic-memory-extract", "candidate content is invalid"),
+                    ProcessingDiagnostics(
+                        stage=ProcessingStage.BUSINESS_VALIDATION,
+                        reason=ProcessingFailureReason.INVALID_OUTPUT,
+                        failure_location="atomic-memory-extract",
+                    ),
+                ) from error
             if not set(candidate.evidence_ids) <= supplied:
-                raise InvalidInferenceOutputError(
-                    "atomic-memory-extract", "candidate cites unavailable Source evidence"
+                raise attach_diagnostics(
+                    InvalidInferenceOutputError("atomic-memory-extract", "candidate cites unavailable Source evidence"),
+                    ProcessingDiagnostics(
+                        stage=ProcessingStage.BUSINESS_VALIDATION,
+                        reason=ProcessingFailureReason.INVALID_OUTPUT,
+                        failure_location="atomic-memory-extract",
+                    ),
                 )
         return output.candidates
 

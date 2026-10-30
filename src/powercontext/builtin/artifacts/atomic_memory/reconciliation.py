@@ -20,13 +20,19 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Any, Literal, NoReturn
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from powercontext.artifacts import ArtifactRef
 from powercontext.builtin.artifacts.atomic_memory.errors import AtomicMemoryConflictError
 from powercontext.builtin.artifacts.atomic_memory.extraction import LANGUAGE_RULES, TIME_RULES, AtomicMemoryEvidence
 from powercontext.builtin.artifacts.atomic_memory.models import AtomicMemoryContent, AtomicMemoryRead
 from powercontext.builtin.inference import InvalidInferenceOutputError
+from powercontext.builtin.processing_diagnostics import (
+    ProcessingDiagnostics,
+    ProcessingFailureReason,
+    ProcessingStage,
+    attach_diagnostics,
+)
 from powercontext.sources import SourceRef
 
 ATOMIC_MEMORY_RECONCILIATION_INSTRUCTIONS = f"""
@@ -222,7 +228,17 @@ class AtomicMemoryWindowWorkset:
 
         if output.content is None:
             _invalid("write content is missing")
-        content = AtomicMemoryContent(kind=output.content.kind, text=output.content.text)
+        try:
+            content = AtomicMemoryContent(kind=output.content.kind, text=output.content.text)
+        except ValidationError as error:
+            raise attach_diagnostics(
+                InvalidInferenceOutputError("atomic-memory-reconcile", "write content is invalid"),
+                ProcessingDiagnostics(
+                    stage=ProcessingStage.BUSINESS_VALIDATION,
+                    reason=ProcessingFailureReason.INVALID_OUTPUT,
+                    failure_location="atomic-memory-reconcile",
+                ),
+            ) from error
         inputs = (proposal, *targets)
         origins = tuple({read.ref.artifact_id: read for item in inputs for read in item.origins}.values())
         evidence_by_id = {item.evidence_id: item for item in request.evidence}
@@ -330,4 +346,11 @@ def unique_evidence(
 
 
 def _invalid(reason: str) -> NoReturn:
-    raise InvalidInferenceOutputError("atomic-memory-reconcile", reason)
+    raise attach_diagnostics(
+        InvalidInferenceOutputError("atomic-memory-reconcile", reason),
+        ProcessingDiagnostics(
+            stage=ProcessingStage.BUSINESS_VALIDATION,
+            reason=ProcessingFailureReason.INVALID_OUTPUT,
+            failure_location="atomic-memory-reconcile",
+        ),
+    )
