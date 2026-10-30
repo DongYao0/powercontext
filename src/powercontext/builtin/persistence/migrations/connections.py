@@ -105,6 +105,7 @@ class MaintenanceConnections:
         operation: Callable[[Connection | None, BackendIdentity, Callable[[], None]], _T],
         *,
         writable: bool = False,
+        allow_missing_database: bool = False,
     ) -> _T:
         if isinstance(self.config, SQLiteConfig):
             return self._sqlite(operation, self.config, writable=writable)
@@ -129,7 +130,15 @@ class MaintenanceConnections:
                     )
                 initial_inode = _directory_inode(path) if path.exists() else None
                 return asyncio.run(
-                    self._seekdb(operation, self.config, path, identity, initial_inode, writable=writable)
+                    self._seekdb(
+                        operation,
+                        self.config,
+                        path,
+                        identity,
+                        initial_inode,
+                        writable=writable,
+                        allow_missing_database=allow_missing_database,
+                    )
                 )
         return asyncio.run(self._oceanbase(operation, self.config, writable=writable))
 
@@ -181,6 +190,7 @@ class MaintenanceConnections:
         initial_inode: tuple[int, int] | None,
         *,
         writable: bool,
+        allow_missing_database: bool,
     ) -> _T:
         try:
             module = seekdb_profile._load_binding()
@@ -208,6 +218,12 @@ class MaintenanceConnections:
                     try:
                         await require_existing_database(engine, name=config.database)
                     except MissingDatabaseError as error:
+                        if allow_missing_database:
+                            if initial_inode != _directory_inode(path):
+                                raise MigrationError(
+                                    "migration_lock_lost", "The seekdb maintenance target was lost."
+                                ) from error
+                            return operation(None, identity, lambda: None)
                         raise MigrationError("database_missing", str(error)) from error
                     except DatabaseAccessError as error:
                         raise MigrationError("database_access_denied", str(error)) from error

@@ -515,7 +515,7 @@ def test_remote_cli_uses_the_configured_maintenance_identity_and_coordination_sc
     (tmp_path / "deployment.env").write_text(environment, encoding="utf-8")
     identity = BackendIdentity(kind, f"simulated-{kind}-database-identity", database_name)
 
-    def inspect_empty_database(_connections, operation, *, writable=False):
+    def inspect_empty_database(_connections, operation, *, writable=False, **_options):
         assert not writable
         return operation(None, identity, lambda: None)
 

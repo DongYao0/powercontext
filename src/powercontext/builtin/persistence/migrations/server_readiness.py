@@ -144,15 +144,7 @@ def prepare_server_storage(settings, *, injected_embedding=False, embedding_prof
         MaintenanceConnections(database).run(verify)
         return
     runner = deployment_runner(settings, embedding_profile=profile)
-    try:
-        plan = runner.plan()
-    except MigrationError as error:
-        if database.kind != "seekdb" or error.code != "database_missing":
-            raise
-        from .connections import MaintenanceConnections
-
-        MaintenanceConnections(database).run(lambda _connection, _identity, _guard: None, writable=True)
-        plan = runner.plan()
+    plan = runner.plan()
     if plan.state == "uninitialized" and database.kind in {"sqlite", "seekdb"}:
         runner.apply(plan_id=plan.plan_id, accepted=True, maintenance_confirmed=True)
     elif plan.state != "ready":

@@ -235,7 +235,7 @@ def test_seekdb_inspection_reuses_an_existing_database_without_provisioning(shor
 
 
 @pytest.mark.skipif(not _SEEKDB, reason="set POWERCONTEXT_TEST_BOOTSTRAP_SEEKDB=1")
-def test_seekdb_db_migrate_reports_a_missing_selected_database(short_tmp_path: Path) -> None:
+def test_seekdb_db_migrate_plans_and_applies_a_missing_selected_database(short_tmp_path: Path) -> None:
     pytest.importorskip("pylibseekdb")
     path = short_tmp_path / "seekdb"
     retained = SeekDBConfig(path=path, database="retained_context")
@@ -253,10 +253,9 @@ def test_seekdb_db_migrate_reports_a_missing_selected_database(short_tmp_path: P
         encoding="utf-8",
     )
 
-    for command in ("status", "plan", "verify"):
-        result = CliRunner().invoke(
-            create_cli([server_app]), ["server", "db-migrate", command, "--env-file", str(environment)]
-        )
+    cli = create_cli([server_app])
+    for command in ("status", "verify"):
+        result = CliRunner().invoke(cli, ["server", "db-migrate", command, "--env-file", str(environment)])
         assert result.exit_code == 1, result.output
         payload = json.loads(result.stdout)
         assert payload["state"] == "blocked"
@@ -265,6 +264,13 @@ def test_seekdb_db_migrate_reports_a_missing_selected_database(short_tmp_path: P
         assert "does not exist" in payload["message"]
         assert "CREATE DATABASE IF NOT EXISTS `absent_context`" in payload["message"]
         assert "No fallback database was selected" in payload["message"]
+
+    planned = CliRunner().invoke(
+        cli, ["server", "db-migrate", "plan", "--env-file", str(environment), "--backup", "skip"]
+    )
+    assert planned.exit_code == 0, planned.output
+    plan = json.loads(planned.stdout)
+    assert plan["state"] == "uninitialized"
 
     async def verify() -> None:
         async with (
@@ -279,6 +285,28 @@ def test_seekdb_db_migrate_reports_a_missing_selected_database(short_tmp_path: P
             assert absent.all() == []
 
     asyncio.run(verify())
+
+    applied = CliRunner().invoke(
+        cli,
+        [
+            "server",
+            "db-migrate",
+            "apply",
+            "--env-file",
+            str(environment),
+            "--backup",
+            "skip",
+            "--plan-id",
+            plan["plan_id"],
+            "--yes",
+            "--maintenance-confirmed",
+        ],
+    )
+    assert applied.exit_code == 0, applied.output
+    assert json.loads(applied.stdout)["state"] == "ready"
+    verified = CliRunner().invoke(cli, ["server", "db-migrate", "verify", "--env-file", str(environment)])
+    assert verified.exit_code == 0, verified.output
+    assert json.loads(verified.stdout)["state"] == "ready"
 
 
 @pytest.mark.skipif(not _SEEKDB, reason="set POWERCONTEXT_TEST_BOOTSTRAP_SEEKDB=1")
