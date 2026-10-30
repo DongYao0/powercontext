@@ -170,8 +170,9 @@ launch arguments, requirements digest, installed file bytes, and file digests. I
 make an untrusted runtime or wheel trustworthy. Existing output trees are never overwritten; inspect a partial build
 before removing it or building at a new location.
 
-The release resource producer (#2112) supplies fixed input versions, hashes, platform/architecture identity,
-redistribution licenses, and provenance. Windows/macOS packaging (#2108/#2109) must publish Ops to a stable,
+The [candidate resource producer](../../development/managed-resource-production.md) supplies fixed input versions,
+hashes, platform/architecture identity, retained license notices, and provenance for all three Windows/macOS targets.
+Its output is always unqualified. Windows/macOS packaging (#2108/#2109) must publish Ops to a stable,
 user-protected location independent of both the Desktop installation and the managed Server. Desktop removal must not
 silently remove the maintenance tool or user data. Signing, macOS notarization, clean-machine execution, and native
 service/login/reboot acceptance are separate release checks; a successful bundle build does not establish them.

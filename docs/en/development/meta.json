@@ -4,6 +4,7 @@
   "defaultOpen": false,
   "pages": [
     "releasing",
+    "managed-resource-production",
     "core-protocol",
     "memory-layer",
     "plugin-contract",
