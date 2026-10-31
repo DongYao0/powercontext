@@ -36,7 +36,7 @@ jobs:
           # experiment records snapshots every 45 seconds for up to 20 minutes
           # per attempt, including beyond the observed 1000-second SQL timeout.
           uv run --locked --extra seekdb python scripts/probe_seekdb_migration_lock.py \
-            --attempts 12 --timeout 1200 --output .powercontext/seekdb-lock-observation
+            --restart --attempts 12 --timeout 1200 --output .powercontext/seekdb-lock-observation
 
       - name: Upload observation evidence
         if: always()

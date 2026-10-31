@@ -337,6 +337,41 @@ powercontext server db-migrate verify --env-file oceanbase.env \
 
 使用最新计划中的 `plan_id` 和 `coordination.pending_run_id`。重新声明既有手动备份，不用部分状态的新备份替换原恢复点。正常升级仍只确认一次；中断恢复另需用户显式作出 DBA 声明，PC 展示计划时不会自动替用户确认。
 
+## 原生 SeekDB 重启与恢复验收
+
+嵌入式引擎必须使用 `pylibseekdb>=1.4.0.post2,<2`，事务恢复修复由该原生依赖提供。迁移检查保留
+`SHOW TRIGGERS`，并在操作之间释放最后一个客户端。分别在 Python 3.11 和 Python 3.14 环境中，从仓库根目录执行：
+
+```bash
+uv sync --locked --extra seekdb
+uv run --locked --extra seekdb python scripts/probe_seekdb_migration_lock.py \
+  --scenario migration --restart --attempts 12 --timeout 180 --output .powercontext/seekdb-migration
+uv run --locked --extra seekdb python scripts/probe_seekdb_migration_lock.py \
+  --scenario restart-recovery --restart --attempts 12 --timeout 180 --output .powercontext/seekdb-restart
+```
+
+每次运行使用新的输出目录。migration 场景选择原 issue 的
+`test_mysql_committed_revision_recovers_before_evidence_advance[seekdb]` 节点；restart-recovery 场景检查元数据查询、
+提交、最后一个客户端关闭、基线 DDL，以及重开后内容和标签的保留。每次必须恰好一个测试通过，跳过、报错和超时均不算通过。
+`--restart` 还要求同一目录经历多个不同的原生进程 PID。证据包括 Python 和绑定版本、原生二进制 SHA-256、实例生命周期、
+SQL 日志、压缩后的原生日志，以及慢执行时的事务快照。独立的延长观察工作流仅用于诊断，不能用它的较长时限替代正常验收时限。
+
+故障库门禁在 Linux 上执行，每次重开前通过内核退出事件确认上一代进程已结束，不使用固定启动等待。
+故障库验收应先在隔离的 `1.4.0.post1` 环境中，使用 `--scenario restart-recovery --keep-failed-storage` 复现阻塞。
+停止引擎后，冻结失败输出中的 `tmp/pc-*/seekdb` 目录，并保持原件不变。此场景在 `powercontext` 数据库中创建合成数据，
+包括故障库测试要求的 `preserved` 内容和 `Keep` 标签。健康库、结构或哨兵数据不同的库，不能用于证明该缺陷已恢复。
+使用同一冻结故障库的独立副本，对比旧引擎与修复后的引擎：
+
+```bash
+uv run --locked --extra seekdb python scripts/probe_seekdb_migration_lock.py \
+  --scenario fixture-recovery --fixture /absolute/path/to/frozen/seekdb \
+  --restart --attempts 1 --timeout 75 --output .powercontext/seekdb-fixture
+```
+
+故障库门禁只打开临时副本：创建并提交基线版本表、验证原始数据；重开后再次验证并提交新写入；第三次打开时读回该写入。
+故障库原件与旧版失败证据保存在本地；CI 只上传诊断文件，不上传物理数据库。这些门禁不代表完整升级支持，
+发布仍须通过安装产物的全部升级矩阵。
+
 ## 备份选择
 
 | 策略 | 行为 | 参数 |
