@@ -17,10 +17,8 @@
 from __future__ import annotations
 
 import asyncio
-import ctypes
 import json
 import os
-import select
 import shutil
 import tempfile
 from collections.abc import Callable, Iterator
@@ -34,11 +32,28 @@ from sqlalchemy import Connection, text
 from powercontext.builtin.persistence.migrations.connections import BackendIdentity, MaintenanceConnections
 from powercontext.builtin.persistence.migrations.deployment import production_bundle
 from powercontext.builtin.persistence.seekdb import SeekDBConfig, profile
+from tests.seekdb_support import RestartingInstance
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("POWERCONTEXT_TEST_SEEKDB_RESTART_RECOVERY") != "1",
     reason="native seekdb restart/recovery release gate not enabled",
 )
+
+
+@pytest.fixture(autouse=True)
+def native_restarts(monkeypatch: pytest.MonkeyPatch) -> None:
+    original = profile._open_instance
+
+    async def open_generation(binding, path: Path):
+        instance = await original(binding, path)
+        try:
+            pid = int((path / "run/seekdb.pid").read_text().strip())
+        except (OSError, ValueError):
+            instance.close()
+            raise
+        return RestartingInstance(instance, pid)
+
+    monkeypatch.setattr(profile, "_open_instance", open_generation)
 
 
 @pytest.fixture
@@ -111,27 +126,11 @@ def test_metadata_inspection_survives_last_client_restarts(recovery_path: Path) 
 
 @contextmanager
 def _native_generation(binding, path: Path):
-    """Wait for Linux process exit, including when Python lacks os.pidfd_open."""
     instance = asyncio.run(profile._open_instance(binding, path))
-    try:
-        pid = int((path / "run/seekdb.pid").read_text().strip())
-        pidfd_open = ctypes.CDLL(None, use_errno=True).pidfd_open
-        pidfd_open.argtypes = (ctypes.c_int, ctypes.c_uint)
-        pidfd_open.restype = ctypes.c_int
-        descriptor = pidfd_open(pid, 0)
-        if descriptor < 0:
-            raise OSError(ctypes.get_errno(), "could not open native pidfd")  # noqa: TRY301 -- close on setup failure
-    except BaseException:
-        instance.close()
-        raise
     try:
         yield instance
     finally:
-        try:
-            instance.close()
-            assert select.select([descriptor], [], [], 10)[0], "native process did not exit after last-client close"
-        finally:
-            os.close(descriptor)
+        instance.close()
 
 
 def test_saved_fault_recovers_and_remains_usable_after_reopen(recovery_path: Path) -> None:

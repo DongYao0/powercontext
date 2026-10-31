@@ -64,8 +64,10 @@ def record(directory: Path, event: str, **values: object) -> None:
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Optional pytest plugin: observe only this subprocess's native instance lifetime."""
     from powercontext.builtin.persistence.seekdb import profile
+    from tests.seekdb_support import RestartingInstance
 
     directory = Path(os.environ["POWERCONTEXT_SEEKDB_PROBE"])
+    restart = os.environ.get("POWERCONTEXT_SEEKDB_REQUIRE_RESTART") == "1"
     original = profile._open_instance
 
     class ObservedInstance:
@@ -81,6 +83,8 @@ def pytest_sessionstart(session: pytest.Session) -> None:
             record(directory, "closing", path=str(self.path), native_pid=self.native_pid)
             try:
                 self.instance.close()
+                if restart:
+                    record(directory, "native_exited", path=str(self.path), native_pid=self.native_pid)
             finally:
                 record(directory, "close_returned", path=str(self.path), native_pid=self.native_pid)
 
@@ -92,6 +96,8 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         except (OSError, ValueError):
             instance.close()
             raise
+        if restart:
+            instance = RestartingInstance(instance, native_pid)
         options = dict(instance.connection_options())
         # Embedded scratch instance only. Never capture credentials or external connection settings.
         socket = options.get("unix_socket")
@@ -207,16 +213,24 @@ def stop_process(process: subprocess.Popen[bytes]) -> None:
 
 
 def restart_evidence(directory: Path) -> dict[str, Any]:
-    """Require repeated native starts without reusing a process for the same target."""
+    """Require confirmed exit before each subsequent native generation opens."""
     lifecycle = directory / "lifecycle.jsonl"
     events = [json.loads(line) for line in lifecycle.read_text().splitlines()] if lifecycle.exists() else []
     processes: dict[str, list[int]] = {}
+    running: dict[str, int] = {}
+    valid = True
     for event in events:
         if event["event"] == "opened":
-            processes.setdefault(event["path"], []).append(event["native_pid"])
-    passed = any(len(pids) > 1 for pids in processes.values()) and all(
-        all(pid > 0 for pid in pids) and len(set(pids)) == len(pids) for pids in processes.values()
-    )
+            path, pid = event["path"], event["native_pid"]
+            pids = processes.setdefault(path, [])
+            valid = valid and path not in running and pid > 0 and pid not in pids
+            pids.append(pid)
+            running[path] = pid
+        elif event["event"] == "native_exited":
+            path, pid = event["path"], event["native_pid"]
+            valid = valid and running.get(path) == pid
+            running.pop(path, None)
+    passed = valid and not running and any(len(pids) > 1 for pids in processes.values())
     return {"passed": passed, "processes": processes}
 
 
@@ -236,6 +250,7 @@ def run_attempt(
         os.environ,
         TMPDIR=str(temporary),
         POWERCONTEXT_SEEKDB_PROBE=str(directory),
+        POWERCONTEXT_SEEKDB_REQUIRE_RESTART=str(int(restart)),
         POWERCONTEXT_TEST_MIGRATION_SEEKDB="1",
         POWERCONTEXT_TEST_MIGRATION_SQL_LOG="1",
         POWERCONTEXT_TEST_SEEKDB_RESTART_RECOVERY="1",
@@ -343,7 +358,9 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--keep-failed-storage", action="store_true", help="Retain failed scratch storage for recovery acceptance."
     )
-    parser.add_argument("--restart", action="store_true", help="Require distinct native process IDs across reopenings.")
+    parser.add_argument(
+        "--restart", action="store_true", help="Wait for Linux native process exit before each reopen and verify it."
+    )
     parser.add_argument("--timeout", type=positive_integer, default=180)
     arguments = parser.parse_args()
     if arguments.snapshot:
@@ -374,7 +391,11 @@ def main() -> int:
     node = arguments.node
     directory.mkdir(parents=True)
     binding = import_module("pylibseekdb")
-    native_engine = Path(binding.__file__).with_name("seekdb")
+    binding_file = binding.__file__
+    if binding_file is None:
+        message = "The SeekDB binding has no module file; cannot locate its native engine"
+        raise RuntimeError(message)
+    native_engine = Path(binding_file).with_name("seekdb")
     with native_engine.open("rb") as engine_file:
         native_digest = hashlib.file_digest(engine_file, "sha256").hexdigest()
     (directory / "environment.json").write_text(

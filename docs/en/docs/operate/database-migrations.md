@@ -444,22 +444,26 @@ Run the following from the repository root, separately under Python 3.11 and Pyt
 ```bash
 uv sync --locked --extra seekdb
 uv run --locked --extra seekdb python scripts/probe_seekdb_migration_lock.py \
-  --scenario migration --restart --attempts 12 --timeout 180 --output .powercontext/seekdb-migration
+  --scenario migration --attempts 12 --timeout 180 --output .powercontext/seekdb-migration
 uv run --locked --extra seekdb python scripts/probe_seekdb_migration_lock.py \
   --scenario restart-recovery --restart --attempts 12 --timeout 180 --output .powercontext/seekdb-restart
 ```
 
 Use a new output directory for each run. The migration scenario selects
-`test_mysql_committed_revision_recovers_before_evidence_advance[seekdb]`. The restart scenario checks metadata
-inspection, commit, last-client shutdown, baseline DDL and preserved content and tags after reopening. Each attempt
-must report exactly one passing test, with no skip, error or timeout. `--restart` also requires multiple distinct native
-process IDs for the same directory. Evidence includes the Python and binding versions, native binary SHA-256, instance
+`test_mysql_committed_revision_recovers_before_evidence_advance[seekdb]` with its natural client lifecycle. Releasing a
+client does not imply that the native process has already exited; a rapid reopen may reuse it. The restart scenario
+checks metadata inspection, commit, confirmed last-client shutdown, baseline DDL and preserved content and tags after
+reopening. Its test waits for kernel process-exit notification even when invoked without the probe. Each attempt must
+report exactly one passing test, with no skip, error or timeout. `--restart` explicitly waits up to 10 seconds for native
+exit on each close, then requires distinct process IDs and an exit record before each subsequent open. A timeout fails
+the attempt; it does not retry. Evidence includes the Python and binding versions, native binary SHA-256, instance
 lifetimes, SQL trace, compressed native logs and live transaction snapshots for slow attempts. The separate extended
 observation workflow is diagnostic; its longer deadline does not replace the ordinary acceptance deadline.
 
-The frozen-fixture gate runs on Linux and observes kernel process-exit notifications before each reopen;
-it does not use a fixed startup delay. For recovery acceptance, first reproduce the stall with an isolated `1.4.0.post1` environment and
-`--scenario restart-recovery --keep-failed-storage`. Stop its engine before freezing the failed `tmp/pc-*/seekdb`
+Both explicit restart gates run on Linux and observe kernel process-exit notifications before each reopen;
+neither uses a fixed startup delay. For recovery acceptance, first reproduce the stall with an isolated
+`1.4.0.post1` environment and `--scenario restart-recovery --keep-failed-storage`.
+Stop its engine before freezing the failed `tmp/pc-*/seekdb`
 directory. Keep the original immutable. This scenario creates synthetic data in the `powercontext` database, including
 the `preserved` content and `Keep` tag expected by the fixture test. A healthy database or a fixture with different
 schema or sentinels cannot establish recovery of this defect. Compare the old and fixed engines on separate copies of
