@@ -254,7 +254,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.14"]
-        extras: ["builtin", "cli", "builtin,cli", "server,cli"]
+        extras: ["core", "builtin", "cli", "builtin,cli", "server,cli"]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -278,7 +278,11 @@ jobs:
           uv build --wheel --out-dir "$RUNNER_TEMP/role-wheel"
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/role-venv"
           wheel="$(find "$RUNNER_TEMP/role-wheel" -name '*.whl' -print -quit)"
-          uv pip install --python "$RUNNER_TEMP/role-venv/bin/python" "$wheel[$ROLE_EXTRAS]"
+          if [ "$ROLE_EXTRAS" = core ]; then
+            uv pip install --python "$RUNNER_TEMP/role-venv/bin/python" "$wheel"
+          else
+            uv pip install --python "$RUNNER_TEMP/role-venv/bin/python" "$wheel[$ROLE_EXTRAS]"
+          fi
 
       - name: Verify installed role behavior without checkout imports
         env:
