@@ -125,11 +125,14 @@ def _receipt_model_settings(model: Model, settings: ModelSettings | None) -> dic
     reasoning_effort = effective.get("openai_reasoning_effort")
     if reasoning_effort is not None:
         reasoning_active = reasoning_effort != "none"
+    elif (thinking := effective.get("thinking")) is not None and profile.get("supports_thinking", False):
+        reasoning_active = thinking is not False
     else:
         reasoning_active = bool(profile.get("openai_reasoning_enabled_by_default", False))
-    if reasoning_active and not profile.get("openai_supports_reasoning_effort_none", False):
-        for setting in SAMPLING_PARAMS:
-            effective.pop(setting, None)
+    if profile.get("openai_supports_reasoning_effort_none", False) and not reasoning_active:
+        return effective
+    for setting in SAMPLING_PARAMS:
+        effective.pop(setting, None)
     return effective
 
 
