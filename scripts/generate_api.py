@@ -152,41 +152,23 @@ def _generate_models(
     transport_contract.paths = {}
     if transport_contract.components is None or transport_contract.components.schemas is None:
         raise ContractGenerationError("components.schemas", None)
-    # Read-family values remain strings in the SDK, including custom family names.
-    # A referenced scalar otherwise becomes a RootModel and breaks identity comparisons.
-    family_schema = transport_contract.components.schemas["ArtifactReadFamily"]
-    if not isinstance(family_schema, Schema):
-        raise ContractGenerationError("ArtifactReadFamily schema", family_schema)  # noqa: TRY003
-    for name in ("ArtifactCollectionItem", "ArtifactRevision"):
-        schema = transport_contract.components.schemas[name]
-        if not isinstance(schema, Schema) or schema.properties is None:
-            raise ContractGenerationError("Artifact read schema", name)  # noqa: TRY003
-        schema.properties["family"] = family_schema.model_copy(deep=True)
+    contract_schemas = transport_contract.components.schemas
     exclusive_schemas = {
         name: schema
-        for name, schema in transport_contract.components.schemas.items()
+        for name, schema in contract_schemas.items()
         if isinstance(schema, Schema) and (schema.model_extra or {}).get("x-powercontext-exclusive-fields")
     }
     # Keep address alternatives as fields in the SDK; the generated validator retains their exclusivity.
     transport_data = deepcopy(contract_data)
     transport_data["paths"] = {}
     components = _JSON_OBJECT_ADAPTER.validate_python(transport_data["components"])
-    schemas = _JSON_OBJECT_ADAPTER.validate_python(components["schemas"])
-    family_data = _JSON_OBJECT_ADAPTER.validate_python(
-        family_schema.model_dump(mode="json", by_alias=True, exclude_none=True)
-    )
-    for name in ("ArtifactCollectionItem", "ArtifactRevision"):
-        schema_data = _JSON_OBJECT_ADAPTER.validate_python(schemas[name])
-        properties = schema_data.get("properties")
-        if not isinstance(properties, dict):
-            raise ContractGenerationError("Artifact read schema properties", name)  # noqa: TRY003
-        properties["family"] = family_data
-        schemas[name] = schema_data
+    transport_schemas = _JSON_OBJECT_ADAPTER.validate_python(components["schemas"])
+    _inline_artifact_read_family(contract_schemas, transport_schemas)
     for name in exclusive_schemas:
-        schema_data = _JSON_OBJECT_ADAPTER.validate_python(schemas[name])
+        schema_data = _JSON_OBJECT_ADAPTER.validate_python(transport_schemas[name])
         schema_data.pop("oneOf", None)
-        schemas[name] = schema_data
-    components["schemas"] = schemas
+        transport_schemas[name] = schema_data
+    components["schemas"] = transport_schemas
     transport_data["components"] = components
     result = generate(
         transport_data,
@@ -208,12 +190,38 @@ def _generate_models(
     )
     if not isinstance(result, str):
         raise ContractGenerationError("model generator output", result)  # noqa: TRY003
-    evidence_models = _candidate_evidence_models(contract.components.schemas)
+    evidence_models = _candidate_evidence_models(contract_schemas)
     source = _with_nested_model_defaults(f"{result.rstrip()}\n")
-    source = _with_code_validation(source, contract.components.schemas)
+    source = _with_code_validation(source, contract_schemas)
     source = _with_exclusive_fields(source, exclusive_schemas)
-    source = _with_artifact_search_validation(source, contract.components.schemas)
+    source = _with_artifact_search_validation(source, contract_schemas)
     return _with_candidate_evidence_limits(source, evidence_models)
+
+
+def _inline_artifact_read_family(
+    schemas: dict[str, Schema | Reference], transport_schemas: dict[str, JsonValue]
+) -> None:
+    """Keep read families as strings, including custom values, instead of scalar RootModels."""
+
+    family_schema = schemas.get("ArtifactReadFamily")
+    if family_schema is None:
+        return
+    if not isinstance(family_schema, Schema):
+        raise ContractGenerationError("ArtifactReadFamily schema", family_schema)  # noqa: TRY003
+    family_data = _JSON_OBJECT_ADAPTER.validate_python(
+        family_schema.model_dump(mode="json", by_alias=True, exclude_none=True)
+    )
+    for name in ("ArtifactCollectionItem", "ArtifactRevision"):
+        schema = schemas.get(name)
+        if not isinstance(schema, Schema) or schema.properties is None:
+            raise ContractGenerationError("Artifact read schema", name)  # noqa: TRY003
+        schema.properties["family"] = family_schema.model_copy(deep=True)
+        schema_data = _JSON_OBJECT_ADAPTER.validate_python(transport_schemas[name])
+        properties = schema_data.get("properties")
+        if not isinstance(properties, dict):
+            raise ContractGenerationError("Artifact read schema properties", name)  # noqa: TRY003
+        properties["family"] = family_data
+        transport_schemas[name] = schema_data
 
 
 def _with_exclusive_fields(source: str, schemas: dict[str, Schema]) -> str:
