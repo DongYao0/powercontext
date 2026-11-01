@@ -360,6 +360,8 @@ uv run --locked --extra seekdb python scripts/probe_seekdb_migration_lock.py \
 SQL 日志、压缩后的原生日志，以及慢执行时的事务快照。独立的延长观察工作流仅用于诊断，不能用它的较长时限替代正常验收时限。
 
 两个显式重开验收均在 Linux 上执行，每次重开前通过内核退出事件确认上一代进程已结束，不使用固定启动等待。
+测试优先使用 Python 的 `os.pidfd_open`，其次使用可选的 libc 封装；两者均缺失时，仅在锁定 wheels 对应的
+64 位 x86_64 和 aarch64 架构上调用 Linux syscall。内核报错或退出等待超时仍会导致验收失败。
 故障库验收应先在隔离的 `1.4.0.post1` 环境中，
 使用 `--scenario restart-recovery --keep-failed-storage` 复现阻塞。
 停止引擎后，冻结失败输出中的 `tmp/pc-*/seekdb` 目录，并保持原件不变。此场景在 `powercontext` 数据库中创建合成数据，

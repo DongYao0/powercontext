@@ -14,7 +14,10 @@
 
 """A skipped test or retained engine must not certify native recovery."""
 
+import ctypes
+import errno
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -25,6 +28,7 @@ import pytest
 
 from scripts import probe_seekdb_migration_lock as probe
 from scripts.probe_seekdb_migration_lock import restart_evidence, successful_report
+from tests import seekdb_support
 from tests.seekdb_support import RestartingInstance
 
 
@@ -85,8 +89,28 @@ def owned_process() -> Iterator[subprocess.Popen[bytes]]:
             process.wait(timeout=10)
 
 
+@pytest.fixture(params=("default", "python", "libc", "syscall"))
+def pidfd_backend(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    if request.param == "default":
+        return
+    if request.param == "python":
+        if not hasattr(os, "pidfd_open"):
+            pytest.skip("this Python build does not expose os.pidfd_open")
+        # A working Python API must not need any libc wrapper symbol.
+        monkeypatch.setattr(ctypes, "CDLL", lambda *_args, **_kwargs: SimpleNamespace())
+        return
+    libc = ctypes.CDLL(None, use_errno=True)
+    monkeypatch.delattr(os, "pidfd_open", raising=False)
+    if request.param == "libc":
+        if not hasattr(libc, "pidfd_open"):
+            pytest.skip("this libc does not expose a pidfd_open wrapper")
+    else:
+        # Keep the real syscall entry point but hide the optional named wrapper.
+        monkeypatch.setattr(ctypes, "CDLL", lambda *_args, **_kwargs: SimpleNamespace(syscall=libc.syscall))
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="native restart acceptance uses Linux pidfd")
-def test_last_client_close_waits_for_process_exit(owned_process: subprocess.Popen[bytes]) -> None:
+def test_last_client_close_waits_for_process_exit(owned_process: subprocess.Popen[bytes], pidfd_backend: None) -> None:
     assert owned_process.stdin is not None
     instance = RestartingInstance(SimpleNamespace(close=owned_process.stdin.close), owned_process.pid)
     instance.close()
@@ -95,8 +119,67 @@ def test_last_client_close_waits_for_process_exit(owned_process: subprocess.Pope
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="native restart acceptance uses Linux pidfd")
-def test_last_client_close_rejects_a_process_that_stays_alive(owned_process: subprocess.Popen[bytes]) -> None:
+def test_last_client_close_rejects_a_process_that_stays_alive(
+    owned_process: subprocess.Popen[bytes], pidfd_backend: None
+) -> None:
     instance = RestartingInstance(SimpleNamespace(close=lambda: None), owned_process.pid, timeout=0)
     with pytest.raises(TimeoutError, match="did not exit"):
         instance.close()
     assert owned_process.poll() is None
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="native restart acceptance uses Linux pidfd")
+@pytest.mark.parametrize("error", [errno.ENOSYS, errno.EPERM])
+def test_pidfd_errors_preserve_the_failure_and_close_the_client(
+    owned_process: subprocess.Popen[bytes], monkeypatch: pytest.MonkeyPatch, error: int
+) -> None:
+    def unavailable(_pid: int, _flags: int) -> int:
+        raise OSError(error, os.strerror(error))
+
+    monkeypatch.setattr(os, "pidfd_open", unavailable, raising=False)
+    # Falling back after a real kernel error would hide the reason for failure.
+    monkeypatch.setattr(ctypes, "CDLL", lambda *_args, **_kwargs: SimpleNamespace())
+    assert owned_process.stdin is not None
+    with pytest.raises(OSError) as failed:
+        RestartingInstance(SimpleNamespace(close=owned_process.stdin.close), owned_process.pid)
+    assert failed.value.errno == error
+    assert owned_process.wait(timeout=10) == 0
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="native restart acceptance uses Linux pidfd")
+def test_pidfd_syscall_rejects_unknown_architectures(
+    owned_process: subprocess.Popen[bytes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delattr(os, "pidfd_open", raising=False)
+    monkeypatch.setattr(ctypes, "CDLL", lambda *_args, **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(seekdb_support.platform, "machine", lambda: "unknown")
+    assert owned_process.stdin is not None
+    with pytest.raises(NotImplementedError, match="locked 64-bit"):
+        RestartingInstance(SimpleNamespace(close=owned_process.stdin.close), owned_process.pid)
+    assert owned_process.wait(timeout=10) == 0
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="native restart acceptance uses Linux pidfd")
+def test_last_client_close_supports_pidfds_above_select_limit(
+    owned_process: subprocess.Popen[bytes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import fcntl
+    import resource
+
+    soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if soft != resource.RLIM_INFINITY and soft <= 1025:
+        pytest.skip("the process descriptor limit cannot exercise fd >= 1024")
+    original = seekdb_support._open_pidfd
+
+    def high_descriptor(pid: int) -> int:
+        descriptor = original(pid)
+        try:
+            return fcntl.fcntl(descriptor, fcntl.F_DUPFD_CLOEXEC, 1024)
+        finally:
+            os.close(descriptor)
+
+    monkeypatch.setattr(seekdb_support, "_open_pidfd", high_descriptor)
+    assert owned_process.stdin is not None
+    instance = RestartingInstance(SimpleNamespace(close=owned_process.stdin.close), owned_process.pid)
+    instance.close()
+    assert owned_process.poll() == 0

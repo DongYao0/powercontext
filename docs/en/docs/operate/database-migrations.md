@@ -461,7 +461,9 @@ lifetimes, SQL trace, compressed native logs and live transaction snapshots for 
 observation workflow is diagnostic; its longer deadline does not replace the ordinary acceptance deadline.
 
 Both explicit restart gates run on Linux and observe kernel process-exit notifications before each reopen;
-neither uses a fixed startup delay. For recovery acceptance, first reproduce the stall with an isolated
+neither uses a fixed startup delay. The tests prefer Python's `os.pidfd_open`, then the optional libc wrapper.
+When both are absent, they use the Linux syscall on the locked wheels' 64-bit x86_64 and aarch64 architectures.
+Kernel errors and exit timeouts still fail acceptance. For recovery acceptance, first reproduce the stall with an isolated
 `1.4.0.post1` environment and `--scenario restart-recovery --keep-failed-storage`.
 Stop its engine before freezing the failed `tmp/pc-*/seekdb`
 directory. Keep the original immutable. This scenario creates synthetic data in the `powercontext` database, including
