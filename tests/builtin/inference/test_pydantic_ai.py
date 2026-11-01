@@ -25,6 +25,7 @@ import pytest
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from pydantic import BaseModel, ValidationError
 from pydantic_ai import Embedder
 from pydantic_ai.embeddings import (
     EmbeddingModel as PydanticAIEmbeddingModelBase,
@@ -37,7 +38,7 @@ from pydantic_ai.embeddings import (
     TestEmbeddingModel,
 )
 from pydantic_ai.embeddings.result import EmbedInputType
-from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
 from pydantic_ai.messages import (
     FinishReason,
     ModelMessage,
@@ -51,7 +52,9 @@ from pydantic_ai.messages import (
 from pydantic_ai.models import Model, ModelRequestParameters, ModelResponseState, StreamedResponse
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.instrumented import InstrumentationSettings, InstrumentedModel
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import RequestUsage
 
@@ -67,7 +70,13 @@ from powercontext.builtin.inference.pydantic_ai import (
     PydanticAIEmbeddingModel,
     PydanticAIStructuredGenerator,
     StreamingAggregateModel,
+    _map_error,
     probe_pydantic_ai_model,
+)
+from powercontext.builtin.processing_diagnostics import (
+    ProcessingFailureReason,
+    ProcessingStage,
+    classify_processing_error,
 )
 
 
@@ -221,6 +230,32 @@ def test_structured_generator_passes_explicit_model_settings() -> None:
     asyncio.run(scenario())
 
 
+def test_structured_generator_receipt_uses_reasoning_provider_settings() -> None:
+    provider = OpenAIProvider(api_key="test")
+    reasoning = PydanticAIStructuredGenerator(
+        model=OpenAIChatModel("o3", provider=provider),
+        instructions="Return a value.",
+        input_type=Question,
+        output_type=Answer,
+        model_settings={"temperature": 0.0, "top_p": 0.2, "max_tokens": 512},
+    )
+    ordinary = PydanticAIStructuredGenerator(
+        model=OpenAIChatModel("gpt-4o", provider=provider),
+        instructions="Return a value.",
+        input_type=Question,
+        output_type=Answer,
+        model_settings={"temperature": 0.0, "top_p": 0.2, "max_tokens": 512},
+    )
+
+    reasoning_settings = reasoning.receipt_configuration()["effective_settings"]
+    ordinary_settings = ordinary.receipt_configuration()["effective_settings"]
+    assert "temperature" not in reasoning_settings
+    assert "top_p" not in reasoning_settings
+    assert reasoning_settings["max_tokens"] == 512
+    assert ordinary_settings["temperature"] == 0.0
+    assert ordinary_settings["top_p"] == 0.2
+
+
 def test_structured_generator_enforces_wire_and_cumulative_output_limits() -> None:
     observed_max_tokens: list[int | None] = []
 
@@ -315,6 +350,11 @@ def test_structured_generator_maps_rate_limit_without_exposing_provider_body() -
             await generator.generate(Question("bounded evidence"))
         assert "secret" not in str(error.value)
         assert isinstance(error.value.__cause__, ModelHTTPError)
+        diagnostics = classify_processing_error(error.value)
+        assert diagnostics is not None
+        assert diagnostics.stage is ProcessingStage.GENERATION
+        assert diagnostics.reason is ProcessingFailureReason.RATE_LIMIT
+        assert diagnostics.cause_exception_type == "ModelHTTPError"
 
     asyncio.run(scenario())
 
@@ -847,6 +887,10 @@ def test_embedding_adapter_maps_provider_errors_and_preserves_cause() -> None:
             await adapter.embed(("bounded text",))
         assert error.value.__cause__ is provider_error
         assert "secret" not in str(error.value)
+        diagnostics = classify_processing_error(error.value)
+        assert diagnostics is not None
+        assert diagnostics.stage is ProcessingStage.EMBEDDING
+        assert diagnostics.reason is ProcessingFailureReason.PROVIDER_UNAVAILABLE
 
     asyncio.run(scenario())
 
@@ -865,6 +909,65 @@ def test_embedding_adapter_maps_a_rejected_request_to_a_stable_reason_without_le
         assert error.value.detail == "HTTP 400"
         assert "HTTP 400" in str(error.value)
         assert "secret provider body" not in str(error.value)
+        diagnostics = classify_processing_error(error.value)
+        assert diagnostics is not None
+        assert diagnostics.reason is ProcessingFailureReason.CONFIGURATION
+
+    asyncio.run(scenario())
+
+
+def test_embedding_adapter_classifies_a_provider_context_limit_without_leaking_the_body() -> None:
+    async def scenario() -> None:
+        provider_error = ModelHTTPError(
+            400,
+            "result-model",
+            {"error": {"message": "maximum context length is 8192 tokens, body secret-provider-body"}},
+        )
+        adapter = PydanticAIEmbeddingModel(
+            embedder=Embedder(ResultEmbeddingModel((), error=provider_error)),
+            profile=TEST_PROFILE,
+        )
+
+        with pytest.raises(PydanticAIConfigurationError) as error:
+            await adapter.embed(("bounded text",))
+
+        diagnostics = classify_processing_error(error.value)
+        assert diagnostics is not None
+        assert diagnostics.stage is ProcessingStage.EMBEDDING
+        assert diagnostics.reason is ProcessingFailureReason.CONTEXT_OVERFLOW
+        assert "secret-provider-body" not in str(error.value)
+
+    asyncio.run(scenario())
+
+
+def test_structured_generator_classifies_a_length_finish_reason_as_truncated_output() -> None:
+    async def truncated(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del messages, info
+        return ModelResponse(
+            parts=[TextPart("partial")],
+            provider_response_id="req-truncated",
+            finish_reason="length",
+            state="incomplete",
+        )
+
+    async def scenario() -> None:
+        generator = PydanticAIStructuredGenerator(
+            model=FunctionModel(truncated),
+            instructions="Return a value.",
+            input_type=Question,
+            output_type=Answer,
+            limits=InferenceLimits(allow_continuations=False),
+        )
+
+        with pytest.raises(InvalidInferenceOutputError) as error:
+            await generator.generate(Question("bounded evidence"))
+
+        diagnostics = classify_processing_error(error.value)
+        assert diagnostics is not None
+        assert diagnostics.stage is ProcessingStage.GENERATION
+        assert diagnostics.reason is ProcessingFailureReason.OUTPUT_TRUNCATED
+        assert diagnostics.finish_reason == "length"
+        assert diagnostics.provider_request_id == "req-truncated"
 
     asyncio.run(scenario())
 
@@ -908,5 +1011,152 @@ def test_embedding_adapter_maps_empty_provider_data_to_unavailable() -> None:
 
         with pytest.raises(InferenceUnavailableError):
             await adapter.embed(("bounded text",))
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("status_code", [409, 425])
+def test_structured_generator_keeps_transient_provider_conflicts_unavailable(status_code) -> None:
+    async def conflict(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del messages, info
+        raise ModelHTTPError(status_code, "test-model", {"error": "try again"})
+
+    async def scenario() -> None:
+        generator = PydanticAIStructuredGenerator(
+            model=FunctionModel(conflict),
+            instructions="Return a value.",
+            input_type=Question,
+            output_type=Answer,
+        )
+
+        with pytest.raises(InferenceUnavailableError) as error:
+            await generator.generate(Question("bounded evidence"))
+
+        diagnostics = classify_processing_error(error.value)
+        assert diagnostics is not None
+        assert diagnostics.reason is ProcessingFailureReason.PROVIDER_UNAVAILABLE
+        assert diagnostics.cause_exception_type == "ModelHTTPError"
+
+    asyncio.run(scenario())
+
+
+def test_usage_limit_maps_to_the_originating_generation_stage() -> None:
+    mapped = _map_error(UsageLimitExceeded("request limit"), operation="generate", timeout_seconds=1.0)
+
+    assert mapped is not None
+    diagnostics = classify_processing_error(mapped)
+
+    assert diagnostics is not None
+    assert diagnostics.stage is ProcessingStage.GENERATION
+    assert diagnostics.reason is ProcessingFailureReason.USAGE_LIMIT
+    assert diagnostics.cause_exception_type == "UsageLimitExceeded"
+
+
+def test_usage_limit_public_generate_path_reports_generation_stage() -> None:
+    async def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del messages, info
+        return ModelResponse(parts=[TextPart('{"value":"stable"}')], usage=RequestUsage(output_tokens=11))
+
+    async def scenario() -> None:
+        generator = PydanticAIStructuredGenerator(
+            model=FunctionModel(respond),
+            instructions="Return a value.",
+            input_type=Question,
+            output_type=Answer,
+            limits=InferenceLimits(output_tokens_limit=10),
+        )
+
+        with pytest.raises(InvalidInferenceOutputError) as error:
+            await generator.generate(Question("bounded evidence"))
+
+        diagnostics = classify_processing_error(error.value)
+        assert diagnostics is not None
+        assert diagnostics.stage is ProcessingStage.GENERATION
+        assert diagnostics.reason is ProcessingFailureReason.USAGE_LIMIT
+        assert diagnostics.cause_exception_type == "UsageLimitExceeded"
+
+    asyncio.run(scenario())
+
+
+def test_a_413_without_context_evidence_is_not_context_overflow() -> None:
+    mapped = _map_error(
+        ModelHTTPError(413, "test-model", {"error": "upload too large"}),
+        operation="generate",
+        timeout_seconds=1.0,
+    )
+
+    assert mapped is not None
+    diagnostics = classify_processing_error(mapped)
+
+    assert diagnostics is not None
+    assert diagnostics.reason is ProcessingFailureReason.CONFIGURATION
+
+
+def test_non_length_incomplete_response_does_not_claim_truncation() -> None:
+    async def filtered(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del messages, info
+        return ModelResponse(parts=[TextPart("partial")], finish_reason="content_filter", state="incomplete")
+
+    async def scenario() -> None:
+        generator = PydanticAIStructuredGenerator(
+            model=FunctionModel(filtered),
+            instructions="Return a value.",
+            input_type=Question,
+            output_type=Answer,
+            limits=InferenceLimits(allow_continuations=False),
+        )
+
+        with pytest.raises(InvalidInferenceOutputError) as error:
+            await generator.generate(Question("bounded evidence"))
+
+        diagnostics = classify_processing_error(error.value)
+        assert diagnostics is not None
+        assert diagnostics.reason is None
+        assert diagnostics.finish_reason == "content_filter"
+
+    asyncio.run(scenario())
+
+
+def test_embedding_public_path_maps_validation_error_to_invalid_output() -> None:
+    class Payload(BaseModel):
+        value: int
+
+    with pytest.raises(ValidationError) as captured:
+        Payload.model_validate({"value": "not-an-integer"})
+    validation_error = captured.value
+
+    async def scenario() -> None:
+        adapter = PydanticAIEmbeddingModel(
+            embedder=Embedder(ResultEmbeddingModel((), error=validation_error)),
+            profile=TEST_PROFILE,
+        )
+
+        with pytest.raises(InvalidInferenceOutputError) as error:
+            await adapter.embed(("bounded text",))
+
+        diagnostics = classify_processing_error(error.value)
+        assert diagnostics is not None
+        assert diagnostics.stage is ProcessingStage.EMBEDDING
+        assert diagnostics.reason is ProcessingFailureReason.INVALID_OUTPUT
+        assert diagnostics.cause_exception_type == "ValidationError"
+
+    asyncio.run(scenario())
+
+
+def test_embedding_public_path_reports_usage_limit_in_embedding_stage() -> None:
+    async def scenario() -> None:
+        adapter = PydanticAIEmbeddingModel(
+            embedder=Embedder(ResultEmbeddingModel((), error=UsageLimitExceeded("limit"))),
+            profile=TEST_PROFILE,
+        )
+
+        with pytest.raises(InvalidInferenceOutputError) as error:
+            await adapter.embed(("bounded text",))
+
+        diagnostics = classify_processing_error(error.value)
+        assert diagnostics is not None
+        assert diagnostics.stage is ProcessingStage.EMBEDDING
+        assert diagnostics.reason is ProcessingFailureReason.USAGE_LIMIT
+        assert diagnostics.cause_exception_type == "UsageLimitExceeded"
 
     asyncio.run(scenario())

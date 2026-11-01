@@ -148,11 +148,23 @@ def _generate_models(
     contract: OpenAPI,
     contract_data: dict[str, JsonValue],
 ) -> str:
-    if contract.components is None or contract.components.schemas is None:
+    transport_contract = contract.model_copy(deep=True)
+    transport_contract.paths = {}
+    if transport_contract.components is None or transport_contract.components.schemas is None:
         raise ContractGenerationError("components.schemas", None)
+    # Read-family values remain strings in the SDK, including custom family names.
+    # A referenced scalar otherwise becomes a RootModel and breaks identity comparisons.
+    family_schema = transport_contract.components.schemas["ArtifactReadFamily"]
+    if not isinstance(family_schema, Schema):
+        raise ContractGenerationError("ArtifactReadFamily schema", family_schema)  # noqa: TRY003
+    for name in ("ArtifactCollectionItem", "ArtifactRevision"):
+        schema = transport_contract.components.schemas[name]
+        if not isinstance(schema, Schema) or schema.properties is None:
+            raise ContractGenerationError("Artifact read schema", name)  # noqa: TRY003
+        schema.properties["family"] = family_schema.model_copy(deep=True)
     exclusive_schemas = {
         name: schema
-        for name, schema in contract.components.schemas.items()
+        for name, schema in transport_contract.components.schemas.items()
         if isinstance(schema, Schema) and (schema.model_extra or {}).get("x-powercontext-exclusive-fields")
     }
     # Keep address alternatives as fields in the SDK; the generated validator retains their exclusivity.
@@ -160,6 +172,16 @@ def _generate_models(
     transport_data["paths"] = {}
     components = _JSON_OBJECT_ADAPTER.validate_python(transport_data["components"])
     schemas = _JSON_OBJECT_ADAPTER.validate_python(components["schemas"])
+    family_data = _JSON_OBJECT_ADAPTER.validate_python(
+        family_schema.model_dump(mode="json", by_alias=True, exclude_none=True)
+    )
+    for name in ("ArtifactCollectionItem", "ArtifactRevision"):
+        schema_data = _JSON_OBJECT_ADAPTER.validate_python(schemas[name])
+        properties = schema_data.get("properties")
+        if not isinstance(properties, dict):
+            raise ContractGenerationError("Artifact read schema properties", name)  # noqa: TRY003
+        properties["family"] = family_data
+        schemas[name] = schema_data
     for name in exclusive_schemas:
         schema_data = _JSON_OBJECT_ADAPTER.validate_python(schemas[name])
         schema_data.pop("oneOf", None)
