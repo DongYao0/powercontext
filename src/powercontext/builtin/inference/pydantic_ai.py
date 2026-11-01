@@ -99,6 +99,7 @@ try:
     )
     from pydantic_ai.models import Model, ModelRequestParameters
     from pydantic_ai.models.wrapper import WrapperModel
+    from pydantic_ai.profiles.openai import SAMPLING_PARAMS
     from pydantic_ai.settings import ModelSettings, merge_model_settings
     from pydantic_ai.usage import RunUsage, UsageLimits
     from pydantic_core import PydanticSerializationError
@@ -111,6 +112,25 @@ InputT = TypeVar("InputT")
 OutputT = TypeVar("OutputT")
 
 logger = logging.getLogger(__name__)
+
+
+def _receipt_model_settings(model: Model, settings: ModelSettings | None) -> dict[str, object]:
+    """Return settings that the pinned provider will pass to its request builder."""
+
+    effective = dict(settings or {})
+    profile = getattr(model, "profile", None)
+    if not hasattr(profile, "get") or not profile.get("openai_supports_reasoning", False):
+        return effective
+
+    reasoning_effort = effective.get("openai_reasoning_effort")
+    if reasoning_effort is not None:
+        reasoning_active = reasoning_effort != "none"
+    else:
+        reasoning_active = bool(profile.get("openai_reasoning_enabled_by_default", False))
+    if reasoning_active and not profile.get("openai_supports_reasoning_effort_none", False):
+        for setting in SAMPLING_PARAMS:
+            effective.pop(setting, None)
+    return effective
 
 
 class InferenceLimits(BaseModel):
@@ -272,7 +292,10 @@ class PydanticAIStructuredGenerator(Generic[InputT, OutputT]):
                     model_settings,
                     ModelSettings(max_tokens=self._limits.max_output_tokens_per_request),
                 )
-            self._receipt_settings = merge_model_settings(model.settings, bounded_settings)
+            self._receipt_settings = _receipt_model_settings(
+                model,
+                merge_model_settings(model.settings, bounded_settings),
+            )
             self._agent = Agent(
                 model if self._limits.allow_continuations else _CompleteResponseModel(model),
                 deps_type=input_type,
